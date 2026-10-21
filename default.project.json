@@ -1,0 +1,11 @@
+{
+  "name": "skateport",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "SkatePort": {
+        "$path": "src"
+      }
+    }
+  }
+}

@@ -1,1 +1,5 @@
 golden/target/
+rojo.exe
+*.rbxl
+*.rbxlx
+*.lock
