@@ -149,7 +149,7 @@ end
 
 -- Треугольники одной детали в мировых метрах. Лицевая сторона (нормаль
 -- (b - a) x (c - a), как в triangle_from_volume) всегда наружу: деталь выпуклая,
--- поэтому сравниваем нормаль с направлением от центра детали.
+-- поэтому сравниваем нормаль с направлением от внутренней точки детали.
 function world_geometry.part_triangles(part: BasePart, surface: number?): { skate_world.CollisionTriangle }?
 	local faces = part_faces(part)
 	if faces == nil then
@@ -157,13 +157,23 @@ function world_geometry.part_triangles(part: BasePart, surface: number?): { skat
 	end
 	local cf = part.CFrame
 	local scale = world_geometry.METRES_PER_STUD
+	-- Внутренняя точка — среднее всех вершин: для выпуклой детали оно строго
+	-- внутри. Центр детали не годится: скат клина проходит прямо через него.
+	local sum, count = Vector3.zero, 0
+	for _, face in faces do
+		for _, p in face do
+			sum += p
+			count += 1
+		end
+	end
+	local interior = sum / count
 	local out = {}
 	for _, face in faces do
 		for k = 2, #face - 1 do
 			local a, b, c = face[1], face[k], face[k + 1]
 			local normal = (b - a):Cross(c - a)
 			if normal.Magnitude > 1e-9 then
-				if normal:Dot((a + b + c) / 3) < 0 then
+				if normal:Dot((a + b + c) / 3 - interior) < 0 then
 					b, c = c, b
 				end
 				local function world(p: Vector3): vector
