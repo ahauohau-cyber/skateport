@@ -2,6 +2,8 @@
 //! Пишет tests/golden/<модуль>.luau: входы и ожидаемые биты f32.
 use skate_core::{point_graph::PointGraph, trigonometry};
 use std::fmt::Write as _;
+mod collision;
+mod triangle_query;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -85,6 +87,9 @@ fn main() {
     }
     s.push_str("}\n");
     std::fs::write(format!("{out_dir}/point_graph.luau"), s).unwrap();
+
+    collision::write(&out_dir);
+    triangle_query::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.

@@ -178,6 +178,19 @@ function rt.to_i32(value: number): number
 	return wrapped
 end
 
+-- ROBLOX: f64::from_bits для 64-битной константы, заданной двумя половинами.
+local scratch64 = buffer.create(8)
+function rt.f64_from_bits(high: number, low: number): number
+	buffer.writeu32(scratch64, 0, low)
+	buffer.writeu32(scratch64, 4, high)
+	return buffer.readf64(scratch64, 0)
+end
+
+-- ROBLOX: `flags & mask != 0` для u32.
+function rt.has_bits(flags: number, mask: number): boolean
+	return bit32.band(flags, mask) ~= 0
+end
+
 -- ROBLOX: f32::is_nan.
 function rt.is_nan(value: number): boolean
 	return value ~= value

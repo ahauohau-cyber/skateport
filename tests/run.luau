@@ -8,6 +8,9 @@ local specs = {
 	require("./skate_core/trigonometry.spec"),
 	require("./skate_game/physics/clock.spec"),
 	require("./roblox/fixed_step.spec"),
+	require("./skate_core/physics/collision.spec"),
+	require("./skate_core/physics/triangle_query.spec"),
+	require("./skate_core/physics/triangle_query_unit.spec"),
 }
 
 local report = harness.new()
