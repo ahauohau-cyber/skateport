@@ -90,13 +90,40 @@ end
 -- ROBLOX: f32::mul_add(a, b) = a * b + c с одним округлением.
 -- Произведение двух f32 в f64 точное, поэтому f32(a * b + c) совпадает
 -- с fma Rust (кроме крайне редких случаев двойного округления).
+-- ROBLOX: f32 a * b + c с ОДНИМ округлением, как fma в Rust.
+-- Произведение двух f32 в f64 точное. Сумма в f64 может округлиться, и тогда
+-- второе округление до f32 изредка ошибается: когда сумма в f64 попадает ровно
+-- в середину между двумя f32. Поэтому считаем точную ошибку сложения (TwoSum)
+-- и в этом случае выбираем соседнее f32 по её знаку.
+local NUDGE = 2 ^ -40
 function rt.mul_add(value: number, a: number, b: number): number
-	local exact = value * a + b
-	local rounded = vector.create(exact, 0, 0).x
-	if rounded ~= 0 or exact == 0 or exact ~= exact then
+	local product = value * a
+	local sum = product + b
+	if sum ~= sum or sum == math.huge or sum == -math.huge then
+		return sum
+	end
+	-- TwoSum: точная ошибка округления сложения в f64.
+	local bb = sum - product
+	local err = (product - (sum - bb)) + (b - bb)
+	if sum == 0 then
+		-- в f64 сумма обнулилась, но точное значение — это err
+		if err == 0 then
+			return rt.f32(sum)
+		end
+		return rt.f32(err)
+	end
+	local rounded = rt.f32(sum)
+	if err == 0 then
 		return rounded
 	end
-	return round_subnormal(exact)
+	local step = math.abs(sum) * NUDGE
+	local up = rt.f32(sum + step)
+	local down = rt.f32(sum - step)
+	if up ~= down and sum == (up + down) * 0.5 then
+		-- sum ровно посередине между f32: точное значение сдвинуто на err
+		return if err > 0 then up else down
+	end
+	return rounded
 end
 
 -- ROBLOX: f32::round_ties_even. Половина округляется к чётному.
@@ -190,6 +217,58 @@ end
 function rt.has_bits(flags: number, mask: number): boolean
 	return bit32.band(flags, mask) ~= 0
 end
+
+-- ROBLOX: срезы и копирование массивов слов. Индексы и диапазоны — как в Rust
+-- (с нуля, конец не включается); в Luau элемент k лежит в [k + 1].
+
+-- `words[from..to]` -> новая таблица (копия).
+function rt.slice(words: { number }, from: number, to: number): { number }
+	local result = table.create(to - from) :: { number }
+	for i = from + 1, to do
+		result[i - from] = words[i]
+	end
+	return result
+end
+
+-- `dst[offset..offset + src.len()].copy_from_slice(&src)`.
+function rt.copy_into(dst: { number }, offset: number, src: { number })
+	for i = 1, #src do
+		dst[offset + i] = src[i]
+	end
+end
+
+-- `dst[offset..].copy_from_slice(&src[from..to])`.
+function rt.copy_range(dst: { number }, offset: number, src: { number }, from: number, to: number)
+	for i = from + 1, to do
+		dst[offset + i - from] = src[i]
+	end
+end
+
+-- `dst[from..to].fill(value)`.
+function rt.fill(dst: { number }, from: number, to: number, value: number)
+	for i = from + 1, to do
+		dst[i] = value
+	end
+end
+
+-- `[0u32; n]`.
+function rt.zeros(n: number): { number }
+	local result = table.create(n, 0) :: { number }
+	return result
+end
+
+-- `x ^ 0x8000_0000` — смена знака f32 через биты.
+function rt.flip_sign_bits(words: { number }): { number }
+	local result = table.create(#words) :: { number }
+	for i, w in words do
+		result[i] = bit32.bxor(w, 0x8000_0000)
+	end
+	return result
+end
+
+-- f32::MIN_POSITIVE и f32::MAX.
+rt.F32_MIN_POSITIVE = 2 ^ -126
+rt.F32_MAX = 3.4028234663852886e38
 
 -- ROBLOX: f32::is_nan.
 function rt.is_nan(value: number): boolean

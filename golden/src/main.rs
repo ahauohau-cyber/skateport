@@ -4,6 +4,7 @@ use skate_core::{point_graph::PointGraph, trigonometry};
 use std::fmt::Write as _;
 mod collision;
 mod triangle_query;
+mod world_contact;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -90,6 +91,7 @@ fn main() {
 
     collision::write(&out_dir);
     triangle_query::write(&out_dir);
+    world_contact::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.

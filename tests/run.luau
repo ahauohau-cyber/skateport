@@ -11,6 +11,7 @@ local specs = {
 	require("./skate_core/physics/collision.spec"),
 	require("./skate_core/physics/triangle_query.spec"),
 	require("./skate_core/physics/triangle_query_unit.spec"),
+	require("./skate_core/physics/world_contact.spec"),
 }
 
 local report = harness.new()
