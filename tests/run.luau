@@ -17,6 +17,7 @@ local specs = {
 	require("./skate_game/skate_world.spec"),
 	require("./skate_core/physics/mass.spec"),
 	require("./skate_core/physics/drive.spec"),
+	require("./skate_core/physics/solver.spec"),
 }
 
 local report = harness.new()

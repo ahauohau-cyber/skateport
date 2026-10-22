@@ -191,7 +191,7 @@ function DeckGeometry.new(settings: DeckGeometrySettings): DeckGeometry
 	local half_length = f32(settings.mid_length * 0.5)
 	local half_thickness = f32(settings.thickness * 0.5)
 	local radius = f32(half_thickness * from_bits(0x3F66_6666))
-	local children: { DeckChild } = {
+	local children: { DeckChild } = ({
 		{
 			shape = {
 				kind = "RoundedBox",
@@ -205,7 +205,7 @@ function DeckGeometry.new(settings: DeckGeometrySettings): DeckGeometry
 			transform = identity(),
 			collision_enabled = settings.enable_deck_volume_collisions,
 		},
-	}
+	} :: any)
 
 	-- 82E0B1E0: midpoint = first + (second-first)/2. These endpoints are
 	-- parallel to local Z, so the orientation branch leaves identity.
@@ -214,20 +214,20 @@ function DeckGeometry.new(settings: DeckGeometrySettings): DeckGeometry
 	local capsule_center_z = f32(half_length + longitudinal_half_delta)
 	local arc_width = f32(half_width - half_thickness)
 	for _, x in { arc_width, f32(half_thickness - half_width) } do
-		table.insert(children, {
+		table.insert(children, ({
 			shape = { kind = "Capsule", radius = half_thickness, half_length = capsule_half_length },
 			transform = translated(vector.create(x, 0.0, capsule_center_z)),
 			collision_enabled = settings.enable_end_volume_collisions,
-		})
+		} :: any))
 	end
 	-- 82C0A3E0 retains the sphere constructor's enabled flag, independent
 	-- of the two authored deck collision toggles.
 	for _, z in { from_bits(0x3E70_A3D7), from_bits(0xBE70_A3D7) } do
-		table.insert(children, {
+		table.insert(children, ({
 			shape = { kind = "Sphere", radius = f32(0.035) },
 			transform = translated(vector.create(0.0, from_bits(0xBCA3_D70A), z)),
 			collision_enabled = true,
-		})
+		} :: any))
 	end
 
 	local radians = from_bits(0x3C8E_FA35)
@@ -312,7 +312,7 @@ function DeckChild.mass_moments(self: DeckChild): MassMoments
 		shape = { kind = "RoundedBox", half_extents = vector.create(hx, hy, hz), radius = 0.0 }
 		transform = translated(vector.create(cx, cy, cz))
 	end
-	local primitive = primitive_mass_mod.primitive_mass(shape)
+	local primitive = primitive_mass_mod.primitive_mass(shape :: any)
 	assert(primitive, "every deck child follows a supported source mass branch")
 	local moments = MassMoments.from_primitive(primitive)
 	MassMoments.transform(moments, transform.basis, transform.translation)
