@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- Оригинал Rust-файла: crates/skate-core/src/physics/world_contact/face_specialized.rs (коммит 2e16697)
 -- В Rust это подмодуль dispatch (`#[path = "face_specialized.rs"] mod face_specialized`).

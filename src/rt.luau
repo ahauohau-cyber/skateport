@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- ROBLOX: вспомогательный модуль порта. В Rust его нет.
 -- Здесь собраны замены встроенных операций Rust, которых нет в Luau:
 -- биты f32, округление «к чётному», min/max с правилами Rust для NaN.
@@ -87,19 +88,19 @@ function rt.fround(value: number): number
 	return buffer.readf32(scratch, 0)
 end
 
--- ROBLOX: f32::mul_add(a, b) = a * b + c с одним округлением.
--- Произведение двух f32 в f64 точное, поэтому f32(a * b + c) совпадает
--- с fma Rust (кроме крайне редких случаев двойного округления).
--- ROBLOX: f32 a * b + c с ОДНИМ округлением, как fma в Rust.
+-- ROBLOX: f32 a * b + c с ОДНИМ округлением, как fma (mul_add) в Rust.
 -- Произведение двух f32 в f64 точное. Сумма в f64 может округлиться, и тогда
 -- второе округление до f32 изредка ошибается: когда сумма в f64 попадает ровно
 -- в середину между двумя f32. Поэтому считаем точную ошибку сложения (TwoSum)
 -- и в этом случае выбираем соседнее f32 по её знаку.
-local NUDGE = 2 ^ -40
+-- Быстрый путь (одно округление): если rounded == sum, или rounded лежит со
+-- стороны err, ответ — rounded. Иначе проверяем середину: тогда
+-- candidate = 2·sum − rounded — соседнее f32, и оно представимо точно.
 function rt.mul_add(value: number, a: number, b: number): number
 	local product = value * a
 	local sum = product + b
-	if sum ~= sum or sum == math.huge or sum == -math.huge then
+	if sum - sum ~= 0 then
+		-- NaN или бесконечность
 		return sum
 	end
 	-- TwoSum: точная ошибка округления сложения в f64.
@@ -112,16 +113,23 @@ function rt.mul_add(value: number, a: number, b: number): number
 		end
 		return rt.f32(err)
 	end
-	local rounded = rt.f32(sum)
+	local rounded = vector.create(sum, 0, 0).x
+	if rounded == 0 then
+		-- ROBLOX: субнормальный результат — Roblox обнуляет его в vector.
+		rounded = round_subnormal(sum)
+	end
 	if err == 0 then
 		return rounded
 	end
-	local step = math.abs(sum) * NUDGE
-	local up = rt.f32(sum + step)
-	local down = rt.f32(sum - step)
-	if up ~= down and sum == (up + down) * 0.5 then
+	local d = rounded - sum
+	if d == 0 or (d > 0) == (err > 0) or rounded - rounded ~= 0 then
+		-- sum уже f32, либо rounded на стороне err, либо переполнение
+		return rounded
+	end
+	local candidate = sum - d
+	if rt.f32(candidate) == candidate then
 		-- sum ровно посередине между f32: точное значение сдвинуто на err
-		return if err > 0 then up else down
+		return candidate
 	end
 	return rounded
 end

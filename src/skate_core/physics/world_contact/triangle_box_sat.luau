@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- Оригинал Rust-файла: crates/skate-core/src/physics/world_contact/triangle_box_sat.rs (коммит 2e16697)
 -- В Rust это подмодуль primitive_query (`#[path = "triangle_box_sat.rs"] pub(super) mod triangle_box_sat`).

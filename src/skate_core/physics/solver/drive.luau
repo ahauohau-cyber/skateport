@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- Оригинал Rust-файла: crates/skate-core/src/physics/solver/drive.rs (коммит 2e16697)
 --
@@ -62,6 +63,42 @@ function drive.solve(record: { number }, a: { number }, b: { number })
 	write_column(record, 48, angular_impulse)
 	ConstraintGeometry.apply_impulse_changes(geometry, body_a, body_b, linear_change, angular_change)
 	data.publish_reactions(body_a, body_b, a, b)
+end
+
+
+-- ROBLOX: та же итерация над записью в числах (см. joint_data.project_f).
+local LR = table.create(4, 0)
+local AR = table.create(4, 0)
+
+function drive.solve_floats(r: { number }, a: { number }, b: { number })
+	local px, py, pz, gx, gy, gz = data.relative_corrections_f(r, a, b)
+	data.project_f(r, 16, 24, 32, px, py, pz, r, 8, LR, 0)
+	data.project_f(r, 20, 28, 36, gx, gy, gz, r, 12, AR, 0)
+	-- linear_target: слова 40..43, angular_target: 44..47
+	local linear_limits1, linear_limits2, linear_limits3 = r[28], r[32], r[44]
+	local angular_limits1, angular_limits2, angular_limits3 = r[36], r[40], r[48]
+	local ol1, ol2, ol3, ol4 = r[9], r[10], r[11], r[12]
+	local oa1, oa2, oa3, oa4 = r[13], r[14], r[15], r[16]
+	local l1 = symmetric_impulse_limit(mul_add(LR[1], ol4, r[41]), linear_limits1)
+	local g1 = symmetric_impulse_limit(mul_add(AR[1], oa4, r[45]), angular_limits1)
+	local l2 = symmetric_impulse_limit(mul_add(LR[2], ol4, r[42]), linear_limits2)
+	local g2 = symmetric_impulse_limit(mul_add(AR[2], oa4, r[46]), angular_limits2)
+	local l3 = symmetric_impulse_limit(mul_add(LR[3], ol4, r[43]), linear_limits3)
+	local g3 = symmetric_impulse_limit(mul_add(AR[3], oa4, r[47]), angular_limits3)
+	-- 82AE2FB8/2FC4: XYZ из новых импульсов, четвёртая полоса (мягкость) — старая.
+	r[9], r[10], r[11], r[12] = l1, l2, l3, ol4
+	r[13], r[14], r[15], r[16] = g1, g2, g3, oa4
+	data.apply_impulse_changes_f(
+		r,
+		a,
+		b,
+		f32(l1 - ol1),
+		f32(l2 - ol2),
+		f32(l3 - ol3),
+		f32(g1 - oa1),
+		f32(g2 - oa2),
+		f32(g3 - oa3)
+	)
 end
 
 return drive

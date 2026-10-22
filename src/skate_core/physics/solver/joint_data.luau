@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- Оригинал Rust-файла: crates/skate-core/src/physics/solver/joint_data.rs (коммит 2e16697)
 --
@@ -164,6 +165,94 @@ function ConstraintGeometry.apply_impulse_changes(
 		local after_x = mul_add(-self.inverse_inertia_b[1][component], torque_b.x, b.angular[component])
 		local after_y = mul_add(-self.inverse_inertia_b[2][component], torque_b.y, after_x)
 		b.angular[component] = mul_add(-self.inverse_inertia_b[3][component], torque_b.z, after_y)
+	end
+end
+
+
+-- ROBLOX: варианты над записью, уже переведённой в числа (r[k + 1] =
+-- f32::from_bits(words[k])); реакции — 16 чисел. Без временных таблиц:
+-- результаты пишутся в переданные буферы. Порядок операций тот же.
+
+-- project_correction над столбцами r со смещений c0/c1/c2 (в словах).
+function joint_data.project_f(
+	r: { number },
+	c0: number,
+	c1: number,
+	c2: number,
+	x: number,
+	y: number,
+	z: number,
+	initial: { number },
+	io: number,
+	out: { number },
+	oo: number
+)
+	for component = 1, 4 do
+		local after_x = mul_add(r[c0 + component], x, initial[io + component])
+		local after_y = mul_add(r[c1 + component], y, after_x)
+		out[oo + component] = mul_add(r[c2 + component], z, after_y)
+	end
+end
+local project_f = joint_data.project_f
+
+-- relative_corrections: (точка B − точка A, угловая B − угловая A), по 3 числа.
+function joint_data.relative_corrections_f(r: { number }, a: { number }, b: { number }): (number, number, number, number, number, number)
+	local ax, ay, az = a[9], a[10], a[11]
+	local bx, by, bz = b[9], b[10], b[11]
+	local aarm_x, aarm_y, aarm_z = r[1], r[2], r[3]
+	local barm_x, barm_y, barm_z = r[5], r[6], r[7]
+	local pax = mul_add(-az, aarm_y, mul_add(ay, aarm_z, a[1]))
+	local pay = mul_add(-ax, aarm_z, mul_add(az, aarm_x, a[2]))
+	local paz = mul_add(-ay, aarm_x, mul_add(ax, aarm_y, a[3]))
+	local pbx = mul_add(-bz, barm_y, mul_add(by, barm_z, b[1]))
+	local pby = mul_add(-bx, barm_z, mul_add(bz, barm_x, b[2]))
+	local pbz = mul_add(-by, barm_x, mul_add(bx, barm_y, b[3]))
+	return f32(pbx - pax), f32(pby - pay), f32(pbz - paz), f32(bx - ax), f32(by - ay), f32(bz - az)
+end
+
+local ZERO4 = { 0.0, 0.0, 0.0, 0.0 }
+local LI = table.create(4, 0)
+local AI = table.create(4, 0)
+
+-- apply_impulse_changes: реакции a и b меняются на месте.
+function joint_data.apply_impulse_changes_f(
+	r: { number },
+	a: { number },
+	b: { number },
+	lx: number,
+	ly: number,
+	lz: number,
+	gx: number,
+	gy: number,
+	gz: number
+)
+	-- linear_axes: слова 48/52/56, angular_axes: 60/64/68
+	project_f(r, 48, 52, 56, lx, ly, lz, ZERO4, 0, LI, 0)
+	project_f(r, 60, 64, 68, gx, gy, gz, ZERO4, 0, AI, 0)
+	local ix, iy, iz = LI[1], LI[2], LI[3]
+	local aix, aiy, aiz = AI[1], AI[2], AI[3]
+	local arm_ax, arm_ay, arm_az = r[1], r[2], r[3]
+	local arm_bx, arm_by, arm_bz = r[5], r[6], r[7]
+	local tax = mul_add(-arm_az, iy, mul_add(arm_ay, iz, aix))
+	local tay = mul_add(-arm_ax, iz, mul_add(arm_az, ix, aiy))
+	local taz = mul_add(-arm_ay, ix, mul_add(arm_ax, iy, aiz))
+	local tbx = mul_add(-arm_bz, iy, mul_add(arm_by, iz, aix))
+	local tby = mul_add(-arm_bx, iz, mul_add(arm_bz, ix, aiy))
+	local tbz = mul_add(-arm_by, ix, mul_add(arm_bx, iy, aiz))
+	-- inverse_inertia_a: слова 72/76/80, inverse_inertia_b: 84/88/92
+	local inverse_mass_a = r[76]
+	local inverse_mass_b = r[88]
+	-- Native publication order: linear A, linear B, angular A, angular B.
+	for component = 1, 4 do
+		local impulse = LI[component]
+		a[component] = mul_add(impulse, inverse_mass_a, a[component])
+		b[component] = mul_add(-impulse, inverse_mass_b, b[component])
+	end
+	project_f(r, 72, 76, 80, tax, tay, taz, a, 8, a, 8)
+	for component = 1, 4 do
+		local after_x = mul_add(-r[84 + component], tbx, b[8 + component])
+		local after_y = mul_add(-r[88 + component], tby, after_x)
+		b[8 + component] = mul_add(-r[92 + component], tbz, after_y)
 	end
 end
 
