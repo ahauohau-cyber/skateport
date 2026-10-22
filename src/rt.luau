@@ -213,6 +213,24 @@ function rt.to_i32(value: number): number
 	return wrapped
 end
 
+-- ROBLOX: `x as i32` для float: отбрасывание дробной части к нулю,
+-- насыщение до границ i32, NaN -> 0 (правила Rust).
+function rt.float_as_i32(value: number): number
+	if value ~= value then
+		return 0
+	end
+	if value >= 2147483647 then
+		return 2147483647
+	end
+	if value <= -2147483648 then
+		return -2147483648
+	end
+	if value >= 0 then
+		return math.floor(value)
+	end
+	return math.ceil(value)
+end
+
 -- ROBLOX: f64::from_bits для 64-битной константы, заданной двумя половинами.
 local scratch64 = buffer.create(8)
 function rt.f64_from_bits(high: number, low: number): number
