@@ -12,6 +12,7 @@ mod solver;
 mod assembly;
 mod board;
 mod data;
+mod world;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -107,6 +108,7 @@ fn main() {
     board::write(&out_dir);
     data::write(&out_dir);
     data::write_settings(&out_dir);
+    world::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
