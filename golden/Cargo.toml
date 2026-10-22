@@ -8,5 +8,7 @@ license = "GPL-3.0-only"
 # Эталон для тестов порта: вызывает настоящий skate-core и пишет результаты.
 [dependencies]
 skate-core = { path = "/root/skate-3-rust-engine/crates/skate-core" }
+skate-data = { path = "/root/skate-3-rust-engine/crates/skate-data" }
+serde_json = "1"
 
 [workspace]
