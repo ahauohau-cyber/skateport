@@ -14,6 +14,8 @@ mod board;
 mod data;
 mod world;
 mod colliders;
+mod riding;
+mod board_ground;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -111,6 +113,8 @@ fn main() {
     data::write_settings(&out_dir);
     world::write(&out_dir);
     colliders::write(&out_dir);
+    riding::write(&out_dir);
+    board_ground::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.

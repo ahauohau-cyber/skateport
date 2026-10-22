@@ -21,6 +21,8 @@ local specs = {
 	require("./skate_core/physics/assembly.spec"),
 	require("./skate_core/physics/board.spec"),
 	require("./skate_core/physics/board_world.spec"),
+	require("./skate_core/riding/riding_basics.spec"),
+	require("./skate_core/physics/board_ground.spec"),
 	require("./skate_data/data.spec"),
 	require("./skate_game/physics/settings.spec"),
 	require("./skate_game/physics/colliders.spec"),
