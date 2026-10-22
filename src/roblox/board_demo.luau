@@ -2,8 +2,8 @@
 -- ROBLOX: демо доски без скейтера. Повторяет тестовый тик Rust
 -- `GamePhysics::advance_board` (crates/skate-game/src/physics.rs):
 --   clear_forces -> colliders::world_volumes -> world.query_primitives -> board.advance,
--- плюс проверка на неконечную позу. riding outputs (start_wheel_queries и
--- finish_post_physics) ещё не перенесены — TODO вместе с этапом катания.
+-- плюс проверка на неконечную позу и riding outputs: лучи колёс и щупы до шага,
+-- finish_post_physics после него (как в advance_board).
 -- Отличие от Rust только в источнике сил: вместо графа скейтера тестовые толчки
 -- с клавиатуры (W/S — толчок вдоль деки, A/D — цели поворота траков).
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
@@ -15,6 +15,7 @@ local root = script.Parent.Parent
 local collections = require(root.skate_data.collections)
 local settings_mod = require(root.skate_game.physics.settings)
 local colliders = require(root.skate_game.physics.colliders)
+local riding_outputs = require(root.skate_game.physics.riding_outputs)
 local board_runtime = require(root.skate_core.physics.board_runtime)
 local board_world = require(root.skate_core.physics.board_world)
 local force_queue = require(root.skate_core.physics.force_queue)
@@ -81,7 +82,8 @@ end
 export type Demo = {
 	stop: () -> (),
 	model: Model,
-	stats: { ticks: number, contacts: number, last_ms: number },
+	stats: { ticks: number, contacts: number, last_ms: number, wheels: number, speed: number },
+	riding: any,
 }
 
 -- Запустить доску перед точкой `at` (CFrame в стадах; LookVector — нос доски).
@@ -109,6 +111,10 @@ function board_demo.start(at: CFrame): Demo
 	spawn.translation = vector.create(p.X, p.Y, p.Z)
 
 	local board = BoardRuntime.new(settings.masses, settings.authored, spawn, settings.step.simulation, board_runtime.BoardMotion.Active)
+	-- physics.rs: processed_flags_2468 = 0x2000 у доски без скейтера.
+	local processed_flags_2468 = 0x2000
+	local riding = assert(riding_outputs.RidingOutputs.load(data, board, processed_flags_2468))
+	local RidingOutputs = riding_outputs.RidingOutputs
 
 	-- Видимые детали по коллайдерам стоковой доски (размеры в стадах).
 	local r = settings.wheel_radius / SCALE
@@ -133,7 +139,7 @@ function board_demo.start(at: CFrame): Demo
 	parts[7] = visual("Deck", deck_size / SCALE, Enum.PartType.Block, Color3.fromRGB(60, 45, 35), model)
 	model.PrimaryPart = parts[7]
 
-	local stats = { ticks = 0, contacts = 0, last_ms = 0 }
+	local stats = { ticks = 0, contacts = 0, last_ms = 0, wheels = 0, speed = 0 }
 	local clock = fixed_step.new()
 	local failed = false
 
@@ -163,11 +169,16 @@ function board_demo.start(at: CFrame): Demo
 		if UserInputService:IsKeyDown(Enum.KeyCode.D) then
 			steer -= STEER_TARGET
 		end
+		assert(RidingOutputs.start_wheel_queries(riding, board, world))
+		assert(RidingOutputs.finish_wheel_queries(riding))
 		local volumes = colliders.world_volumes(board, settings)
 		local contacts = BoardWorld.query_primitives(world :: any, volumes, QUERY, RETENTION)
 		stats.contacts = #contacts
 		BoardRuntime.advance(board, contacts, { steer, steer }, settings.step)
+		assert(RidingOutputs.finish_post_physics(riding, board, false, processed_flags_2468, settings.step.simulation.time_step))
 		stats.ticks += 1
+		stats.wheels = riding.ground.wheel_contact_count
+		stats.speed = riding.motion.forward_speed
 		for _, body in BoardRuntime.bodies(board) do
 			local q = body.rates.position
 			if q.x ~= q.x or q.y ~= q.y or q.z ~= q.z or math.abs(q.x) == math.huge or math.abs(q.y) == math.huge or math.abs(q.z) == math.huge then
@@ -179,10 +190,29 @@ function board_demo.start(at: CFrame): Demo
 		stats.last_ms = (os.clock() - t0) * 1000
 	end
 
+	-- Строка состояния: скорость вдоль деки, колёса на земле, время тика.
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SkatePortStats"
+	gui.ResetOnSpawn = false
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromOffset(420, 28)
+	label.Position = UDim2.new(0.5, -210, 0, 8)
+	label.BackgroundTransparency = 0.4
+	label.BackgroundColor3 = Color3.new(0, 0, 0)
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Font = Enum.Font.Code
+	label.TextSize = 16
+	label.Parent = gui
+	local player = game:GetService("Players").LocalPlayer
+	if player then
+		gui.Parent = player:WaitForChild("PlayerGui")
+	end
+
 	local function render()
 		for i, pose in BoardRuntime.part_transforms(board) do
 			parts[i].CFrame = to_cframe(pose)
 		end
+		label.Text = string.format("%.1f км/ч   колёс на земле: %d/4   тик %.1f мс", math.abs(stats.speed) * 3.6, stats.wheels, stats.last_ms)
 	end
 	render()
 
@@ -199,13 +229,14 @@ function board_demo.start(at: CFrame): Demo
 	local demo: Demo = {
 		model = model,
 		stats = stats,
+		riding = riding,
 		stop = function()
 			connection:Disconnect()
 			model:Destroy()
+			gui:Destroy()
 		end,
 	}
 	return demo
 end
 
--- Перевести доску в точку (для кнопки R в клиенте).
 return board_demo

@@ -17,11 +17,11 @@ use skate_core::physics::world_contact::{transform_triangle_volume, ContactPrimi
 use skate_data::collections::Collections;
 use std::fmt::Write as _;
 
-struct S { deck_geometry: DeckGeometry, truck_collisions: bool, truck_shape: MassShape, wheel_radius: f32,
+pub struct S { pub deck_geometry: DeckGeometry, truck_collisions: bool, truck_shape: MassShape, wheel_radius: f32,
     deck_material: RetailContactMaterial, truck_material: RetailContactMaterial, wheel_material: RetailContactMaterial }
 
 // ---- дословная копия crates/skate-game/src/physics/colliders.rs ----
-fn world_volumes(board: &BoardRuntime, settings: &S) -> Vec<BoardWorldVolume> {
+pub fn world_volumes(board: &BoardRuntime, settings: &S) -> Vec<BoardWorldVolume> {
     let poses = board.part_transforms();
     let mut volumes = Vec::new();
     for id in BodyId::ORDER {
@@ -84,8 +84,9 @@ fn prim_s(p: &ContactPrimitive) -> String {
     }
 }
 
-pub fn write(out_dir: &str) {
-    let Ok(root) = std::env::var("SKATE3_ASSET_ROOT") else { return };
+pub struct Stock { pub settings: S, pub masses: [skate_core::physics::rigid_body::RetailBodyMassProperties; 7], pub authored: [RetailAffineTransform; 7], pub step: BoardStepSettings, pub simulation: RetailSimulationStep, pub data: Collections }
+pub fn stock() -> Option<Stock> {
+    let Ok(root) = std::env::var("SKATE3_ASSET_ROOT") else { return None };
     let data = Collections::load(std::path::Path::new(&root)).unwrap();
     let f = |class, field| data.float(class, "default", field).unwrap();
     let bo = |class, field| data.boolean(class, "default", field).unwrap();
@@ -115,6 +116,11 @@ pub fn write(out_dir: &str) {
         deck_material: mat("physicsdeck", "Deck"), truck_material: mat("physicstrucks", "Truck"), wheel_material: mat("physicswheels", "Wheel") };
     let masses = [wheel, wheel, wheel, wheel, truck, truck, deck];
     let authored = authored_body_transforms(geometry);
+    Some(Stock { settings, masses, authored, step, simulation, data })
+}
+
+pub fn write(out_dir: &str) {
+    let Some(Stock { settings, masses, authored, step, simulation, .. }) = stock() else { return };
     let (mut world, _, h) = crate::world::ramp();
     let query = WorldContactSettings { volume_padding: 0.05, maximum_separating_distance: 0.5, edge_cos_bend_normal_threshold: 0.999, convexity_epsilon: 0.01, is_object: false };
     let retention = ContactRetentionSettings { capacity: u32::MAX, duplicate_distance_squared: -1.0, deferred_reduction: true };

@@ -128,7 +128,8 @@ function Collections.field(self: Collections, class: string, key: string, name: 
 	local class_id = numeric_name(class)
 	local field_id = numeric_name(name)
 	local current = key
-	for _ = 0, #self.collections do
+	-- ROBLOX: Rust `for _ in 0..=len` — len + 1 проходов.
+	for _ = 1, #self.collections + 1 do
 		local item = entry(self, class_id, numeric_name(current))
 		if item == nil then
 			return nil, string.format("Missing stock collection %s/%s", class, current)
@@ -136,8 +137,8 @@ function Collections.field(self: Collections, class: string, key: string, name: 
 		local field = item.fields[name]
 		if field == nil then
 			-- ROBLOX: BTreeMap обходит ключи по порядку; первый совпавший по хешу.
-			local names = {}
-			for k in item.fields do
+			local names: { string } = {}
+			for k: string in item.fields do
 				table.insert(names, k)
 			end
 			table.sort(names)

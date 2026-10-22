@@ -27,6 +27,7 @@ local specs = {
 	require("./skate_data/data.spec"),
 	require("./skate_game/physics/settings.spec"),
 	require("./skate_game/physics/colliders.spec"),
+	require("./skate_game/physics/riding_outputs.spec"),
 }
 
 local report = harness.new()
