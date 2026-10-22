@@ -2,16 +2,17 @@
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- Оригинал Rust-файла: crates/skate-game/src/skate_world.rs (коммит 2e16697)
 --
--- TODO: перенесена только часть `collision_world` для переносимых карт
--- (сварка вершин, смежность рёбер, флаги выпуклости и вершин). Чтение
--- архивов retail-карт и `retail_collision_world` в Roblox не нужны: геометрию
--- даёт roblox/world_geometry. Сборка QueryMetadata (меши по 64 треугольника)
--- и вызов BoardWorld::with_query_metadata добавятся вместе с BoardWorld.
+-- TODO: перенесена только `collision_world` для переносимых карт (сварка
+-- вершин, смежность рёбер, флаги выпуклости и вершин, меши по 64 треугольника
+-- для широкой фазы). Чтение архивов retail-карт, `retail_collision_world`,
+-- отрисовка и свет карты в Roblox не нужны: геометрию даёт roblox/world_geometry.
 
 local rt = require("../rt")
 local fixup = require("../skate_core/physics/collision/fixup")
 local board_world = require("../skate_core/physics/board_world")
 local contact = require("../skate_core/physics/contact")
+local query_metadata = require("../skate_core/physics/board_world/query_metadata")
+local drive_frames = require("../skate_core/physics/drive_frames")
 
 local f32 = rt.f32
 local TriangleFeature = fixup.TriangleFeature
@@ -27,6 +28,9 @@ local skate_world = {}
 export type CollisionTriangle = {
 	points: { Vector3 },
 	surface: number,
+	-- ROBLOX: в Rust — EncodeRwSurfaceId из материала карты
+	-- (audio | physics << 7 | pattern << 12). Нет значения — 0.
+	packed_surface: number?,
 }
 
 -- ROBLOX: glam::Vec3 считает в f32 без fma — каждую операцию округляем.
@@ -190,6 +194,58 @@ function skate_world.collision_world_triangles(
 		table.insert(triangles, triangle)
 	end
 	return triangles, nil
+end
+
+-- pub(crate) fn collision_world(map, material) -> Result<BoardWorld, String>
+-- Переносимая карта (без retail-архива): треугольники из collision_world_triangles
+-- и метаданные широкой фазы.
+function skate_world.collision_world(
+	collision: { CollisionTriangle },
+	material: contact.RetailContactMaterial
+): (board_world.BoardWorld?, string?)
+	local triangles, err = skate_world.collision_world_triangles(collision, material)
+	if triangles == nil then
+		return nil, err
+	end
+	local packed_surfaces = {}
+	for i, source in collision do
+		packed_surfaces[i] = source.packed_surface or 0
+	end
+	-- Portable maps have no native cluster hierarchy. Bound contiguous ranges
+	-- once at load time so the existing BVH can reject distant geometry. Keep
+	-- triangle order and mesh identity/filter values: contact tie-breaking,
+	-- packed surfaces and adjacency must not change with this acceleration.
+	local meshes = {}
+	for start = 0, #triangles - 1, 64 do
+		local end_ = math.min(start + 64, #triangles)
+		local points = {}
+		for i = start + 1, end_ do
+			for _, p in triangles[i].triangle.vertices do
+				table.insert(points, p)
+			end
+		end
+		local bounds = query_metadata.Bounds.from_points(points)
+		if bounds == nil then
+			return nil, "SKATE collision bounds empty"
+		end
+		table.insert(meshes, {
+			geometry = 0,
+			rejection_flags = 0,
+			triangle_range = { start = start, end_ = end_ },
+			local_to_world = drive_frames.RetailAffineTransform.IDENTITY(),
+			world_to_local = drive_frames.RetailAffineTransform.IDENTITY(),
+			local_bounds = bounds,
+			matching_group = -1,
+			pool = query_metadata.QueryPool.Ground,
+		})
+	end
+	local metadata = {
+		packed_surfaces = packed_surfaces,
+		meshes = meshes,
+		static_edges = {},
+		island_flags = 0,
+	}
+	return board_world.BoardWorld.with_query_metadata(triangles, metadata :: any)
 end
 
 return skate_world

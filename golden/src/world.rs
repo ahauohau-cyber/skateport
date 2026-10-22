@@ -26,8 +26,7 @@ fn coll_s(c: &skate_core::physics::board_step::BoardCollision) -> String {
         b(c.contact.restitution), b(c.contact.static_friction), b(c.contact.dynamic_friction), c.contact.tag)
 }
 
-pub fn write(out_dir: &str) {
-    let mut r = Rng(0x30a1_d001);
+pub fn ramp() -> (BoardWorld, String, f32) {
     let material = RetailContactMaterial { static_friction: 0.0, dynamic_friction: 0.0, restitution: 1.0 };
     // Пол, рампа 20° и коробка, квады разбиты (0,2,1),(0,3,2) как в ground.rs.
     let mut quads: Vec<[Vector3; 4]> = vec![];
@@ -67,7 +66,13 @@ pub fn write(out_dir: &str) {
             matching_group: -1, pool: QueryPool::Ground,
         });
     }
-    let mut world = BoardWorld::with_query_metadata(tris.clone(), QueryMetadata { packed_surfaces: vec![0; tris.len()], meshes, static_edges: vec![], island_flags: 0 }).unwrap();
+    let world = BoardWorld::with_query_metadata(tris.clone(), QueryMetadata { packed_surfaces: vec![0; tris.len()], meshes, static_edges: vec![], island_flags: 0 }).unwrap();
+    (world, ts, h)
+}
+
+pub fn write(out_dir: &str) {
+    let mut r = Rng(0x30a1_d001);
+    let (mut world, ts, h) = ramp();
     let mut s = String::from("-- Сгенерировано golden/src/world.rs из настоящего skate-core. Не править.\nreturn {\n");
     writeln!(s, "\ttriangles = {{ {} }},", ts).unwrap();
     // лучи

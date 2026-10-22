@@ -6,6 +6,13 @@
       "SkatePort": {
         "$path": "src"
       }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "SkatePortClient": {
+          "$path": "client/board_demo.client.luau"
+        }
+      }
     }
   }
 }

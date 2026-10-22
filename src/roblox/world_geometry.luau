@@ -199,14 +199,15 @@ function world_geometry.default_filter(part: BasePart): boolean
 	return true
 end
 
--- Собрать мир из всех деталей под root (обычно workspace).
--- Треугольники идут без отбора по расстоянию: лишние контакты с дальними
--- и задними гранями отсекает broadphase BoardWorld до узкой фазы.
--- Возвращает треугольники мира и список пропущенных деталей с неизвестной формой.
+-- Собрать мир из всех деталей под root (обычно workspace) — BoardWorld с
+-- метаданными широкой фазы, как collision_world в Rust.
+-- Треугольники идут без отбора по расстоянию: дальние кластеры по 64 треугольника
+-- отсекает broadphase BoardWorld до узкой фазы.
+-- Возвращает мир и список пропущенных деталей с неизвестной формой.
 function world_geometry.collect(
 	root: Instance,
 	filter: ((BasePart) -> boolean)?
-): ({ board_world.WorldTriangle }?, string? | { BasePart })
+): (board_world.BoardWorld?, string? | { BasePart })
 	local accept = filter or world_geometry.default_filter
 	local collision: { skate_world.CollisionTriangle } = {}
 	local skipped: { BasePart } = {}
@@ -220,11 +221,11 @@ function world_geometry.collect(
 			end
 		end
 	end
-	local triangles, err = skate_world.collision_world_triangles(collision, world_geometry.floor_material())
-	if triangles == nil then
+	local world, err = skate_world.collision_world(collision, world_geometry.floor_material())
+	if world == nil then
 		return nil, err
 	end
-	return triangles, skipped
+	return world, skipped
 end
 
 return world_geometry

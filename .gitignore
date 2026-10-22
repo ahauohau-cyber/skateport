@@ -7,3 +7,4 @@ rojo.exe
 # Данные Skate 3 (собираются tools/stock_collections.py), в git не идут
 src/skate_data/stock/
 tests/golden/settings.luau
+tests/golden/colliders.luau
