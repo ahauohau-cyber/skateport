@@ -7,6 +7,7 @@ mod triangle_query;
 mod world_contact;
 mod bodies;
 mod mass;
+mod drive;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -96,6 +97,7 @@ fn main() {
     world_contact::write(&out_dir);
     bodies::write(&out_dir);
     mass::write(&out_dir);
+    drive::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
