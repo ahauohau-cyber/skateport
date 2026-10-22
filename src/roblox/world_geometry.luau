@@ -200,6 +200,8 @@ function world_geometry.default_filter(part: BasePart): boolean
 end
 
 -- Собрать мир из всех деталей под root (обычно workspace).
+-- Треугольники идут без отбора по расстоянию: лишние контакты с дальними
+-- и задними гранями отсекает broadphase BoardWorld до узкой фазы.
 -- Возвращает треугольники мира и список пропущенных деталей с неизвестной формой.
 function world_geometry.collect(
 	root: Instance,
