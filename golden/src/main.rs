@@ -39,6 +39,7 @@ mod airrk;
 mod gjump;
 mod startup;
 mod wipeout;
+mod inphase;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -159,6 +160,7 @@ fn main() {
     gjump::write(&out_dir);
     startup::write(&out_dir);
     wipeout::write(&out_dir);
+    inphase::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.

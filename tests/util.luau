@@ -136,7 +136,9 @@ function util.diff(actual: any, want: any, path: string?): string?
 		if type(actual) ~= "number" then
 			return at .. ": ожидалось число, получено " .. typeof(actual)
 		end
-		if not (tb(actual) == tb(want) or (actual ~= actual and want ~= want)) then
+		-- Сначала биты f32 (различает ±0), затем точное равенство: целые слова
+		-- u32 больше 2^24 при переводе в f32 теряли бы младшие биты.
+		if not ((tb(actual) == tb(want) and actual == want) or (actual ~= actual and want ~= want)) then
 			return string.format("%s: %.9g (0x%08x) vs %.9g (0x%08x)", at, actual :: number, tb(actual), want :: number, tb(want))
 		end
 		return nil
