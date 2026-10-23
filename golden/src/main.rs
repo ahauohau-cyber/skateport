@@ -26,6 +26,7 @@ mod grounded;
 mod input;
 mod graph;
 mod anim1;
+mod anim2;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -133,6 +134,7 @@ fn main() {
     input::write(&out_dir);
     graph::write(&out_dir);
     anim1::write(&out_dir);
+    anim2::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
