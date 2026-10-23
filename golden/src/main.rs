@@ -33,6 +33,7 @@ mod skel2;
 mod data2;
 mod phys3;
 mod traj;
+mod grind;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -147,6 +148,7 @@ fn main() {
     data2::write(&out_dir, &std::env::var("SKATE3_ASSET_ROOT").unwrap());
     phys3::write(&out_dir);
     traj::write(&out_dir);
+    grind::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
