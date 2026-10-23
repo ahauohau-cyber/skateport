@@ -4,12 +4,14 @@
 --   clear_forces -> colliders::world_volumes -> world.query_primitives -> board.advance,
 -- плюс проверка на неконечную позу и riding outputs: лучи колёс и щупы до шага,
 -- finish_post_physics после него (как в advance_board).
--- Отличие от Rust только в источнике сил: вместо графа скейтера тестовые толчки
--- с клавиатуры (W/S — толчок вдоль деки, A/D — цели поворота траков).
+-- Ввод уже настоящий: клавиатура/мышь -> XboxState (roblox/keyboard_pad) ->
+-- ControllerInput (история, Pad, карта действий) -> PlayerControls (Derived
+-- контроллер и все намерения) — тот же путь, что input.rs + controls.rs в Rust.
+-- Временный мост до этапов C–E: силы пока не из графа скейтера, а тестовые —
+-- намерение Pushing толкает вдоль деки, Brake тормозит, Turn задаёт цель траков.
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local root = script.Parent.Parent
 local collections = require(root.skate_data.collections)
@@ -22,6 +24,11 @@ local force_queue = require(root.skate_core.physics.force_queue)
 local drive_frames = require(root.skate_core.physics.drive_frames)
 local world_geometry = require(script.Parent.world_geometry)
 local fixed_step = require(script.Parent.fixed_step)
+local keyboard_pad = require(script.Parent.keyboard_pad)
+local game_input = require(root.skate_game.input)
+local controls = require(root.skate_game.physics.controls)
+local gameplay_map = require(root.skate_core.input.gameplay_map)
+local intents_mod = require(root.skate_core.graph.intents)
 
 local BoardRuntime = board_runtime.BoardRuntime
 local BoardWorld = board_world.BoardWorld
@@ -139,7 +146,12 @@ function board_demo.start(at: CFrame): Demo
 	parts[7] = visual("Deck", deck_size / SCALE, Enum.PartType.Block, Color3.fromRGB(60, 45, 35), model)
 	model.PrimaryPart = parts[7]
 
-	local stats = { ticks = 0, contacts = 0, last_ms = 0, wheels = 0, speed = 0 }
+	local stats = { ticks = 0, contacts = 0, last_ms = 0, wheels = 0, speed = 0, intents = "" }
+	local pad = keyboard_pad.new()
+	local controller_input = game_input.ControllerInput.default()
+	local published = game_input.published_default()
+	local player_controls = controls.PlayerControls.default()
+	local IntentMap = intents_mod.IntentMap
 	local clock = fixed_step.new()
 	local failed = false
 
@@ -148,12 +160,18 @@ function board_demo.start(at: CFrame): Demo
 		BoardRuntime.clear_forces(board)
 		local deck = BoardRuntime.bodies(board)[7].rates
 		local forward = deck.basis.columns[3]
+		-- input.rs publish_actions + controls.rs update на фиксированном тике.
+		game_input.publish_actions(controller_input, published, false, false)
+		local map = gameplay_map.GameplayActions.as_map(gameplay_map.GameplayActions.from_values(published.value.actions.values))
+		controls.PlayerControls.update(player_controls, map, settings.step.simulation.time_step, settings.input_magnitude_threshold, 0)
+		local ai = player_controls.action_intents
+		-- ROBLOX: временный мост (не из игры) до input_phase/ground_runtime.
 		local push = 0
-		if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+		if IntentMap.get(ai, "Pushing") then
 			push += PUSH_FORCE
 		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-			push -= PUSH_FORCE
+		if IntentMap.get(ai, "Brake") and math.abs(stats.speed) > 0.3 then
+			push -= PUSH_FORCE * math.sign(stats.speed)
 		end
 		if push ~= 0 then
 			force_queue.BoardForceQueue.append(BoardRuntime.forces_mut(board), {
@@ -162,13 +180,13 @@ function board_demo.start(at: CFrame): Demo
 				point_body = vector.zero,
 			})
 		end
-		local steer = 0
-		if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-			steer += STEER_TARGET
+		local steer = -(IntentMap.get(ai, "Turn") or 0) * STEER_TARGET
+		local names = {}
+		for name, value in player_controls.named_intents do
+			table.insert(names, if value == 1 then name else string.format("%s=%.2f", name, value))
 		end
-		if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-			steer -= STEER_TARGET
-		end
+		table.sort(names)
+		stats.intents = table.concat(names, " ")
 		assert(RidingOutputs.start_wheel_queries(riding, board, world))
 		assert(RidingOutputs.finish_wheel_queries(riding))
 		local volumes = colliders.world_volumes(board, settings)
@@ -195,8 +213,9 @@ function board_demo.start(at: CFrame): Demo
 	gui.Name = "SkatePortStats"
 	gui.ResetOnSpawn = false
 	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromOffset(420, 28)
-	label.Position = UDim2.new(0.5, -210, 0, 8)
+	label.Size = UDim2.fromOffset(640, 48)
+	label.Position = UDim2.new(0.5, -320, 0, 8)
+	label.TextWrapped = true
 	label.BackgroundTransparency = 0.4
 	label.BackgroundColor3 = Color3.new(0, 0, 0)
 	label.TextColor3 = Color3.new(1, 1, 1)
@@ -212,7 +231,7 @@ function board_demo.start(at: CFrame): Demo
 		for i, pose in BoardRuntime.part_transforms(board) do
 			parts[i].CFrame = to_cframe(pose)
 		end
-		label.Text = string.format("%.1f км/ч   колёс на земле: %d/4   тик %.1f мс", math.abs(stats.speed) * 3.6, stats.wheels, stats.last_ms)
+		label.Text = string.format("%.1f км/ч   колёс на земле: %d/4   тик %.1f мс\n%s", math.abs(stats.speed) * 3.6, stats.wheels, stats.last_ms, stats.intents)
 	end
 	render()
 
@@ -220,6 +239,8 @@ function board_demo.start(at: CFrame): Demo
 		if failed then
 			return
 		end
+		-- input.rs poll_controllers: опрос устройства каждый кадр хоста.
+		game_input.poll_controllers(controller_input, keyboard_pad.poll(pad) :: any)
 		fixed_step.advance(clock, dt, function()
 			return settings.step.simulation.time_step
 		end, tick)
@@ -232,6 +253,7 @@ function board_demo.start(at: CFrame): Demo
 		riding = riding,
 		stop = function()
 			connection:Disconnect()
+			keyboard_pad.destroy(pad)
 			model:Destroy()
 			gui:Destroy()
 		end,

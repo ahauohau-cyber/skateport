@@ -33,6 +33,8 @@ local specs = {
 	require("./skate_game/physics/riding_outputs.spec"),
 	require("./skate_core/input/input_golden.spec"),
 	require("./skate_core/input/input_rust.spec"),
+	require("./skate_game/input/controllers.spec"),
+	require("./skate_game/physics/controls.spec"),
 }
 
 local report = harness.new()
