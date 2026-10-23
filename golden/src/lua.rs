@@ -8,6 +8,7 @@ impl L for u32 { fn l(&self) -> String { self.to_string() } }
 impl L for i32 { fn l(&self) -> String { self.to_string() } }
 impl L for u8 { fn l(&self) -> String { self.to_string() } }
 impl L for usize { fn l(&self) -> String { self.to_string() } }
+impl L for u64 { fn l(&self) -> String { self.to_string() } }
 impl L for bool { fn l(&self) -> String { self.to_string() } }
 impl L for Vector3 { fn l(&self) -> String { format!("V(0x{:08x}, 0x{:08x}, 0x{:08x})", self.x.to_bits(), self.y.to_bits(), self.z.to_bits()) } }
 impl<T: L, const N: usize> L for [T; N] { fn l(&self) -> String { format!("{{ {} }}", self.iter().map(|x| x.l()).collect::<Vec<_>>().join(", ")) } }

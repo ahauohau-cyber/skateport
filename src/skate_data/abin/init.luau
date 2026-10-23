@@ -22,6 +22,14 @@ local reader = require("@self/reader")
 abin.Bank = bank.Bank
 abin.Reader = reader.Reader
 
+-- ROBLOX: impl Display for Error — "ABIN at {:#x}: {message}".
+function abin.error_to_string(e: any): string
+	if type(e) == "table" and e.offset ~= nil then
+		return string.format("ABIN at 0x%x: %s", e.offset, tostring(e.message))
+	end
+	return tostring(e)
+end
+
 -- ROBLOX: enum Codec -> "Raw" | "Vbr" | { other = word }.
 -- 82D17A60 reverses the disk word and compares RD\0\0 and VBR\0.
 function abin.codec_from_word(word: number): any
