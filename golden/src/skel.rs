@@ -446,4 +446,122 @@ pub fn write(out_dir: &str, asset_root: &str) {
         fsettings_l.l(), record_l(&body.record).l(), frames26.l(), weights.l(), body.animation_to_world.l()).unwrap();
     s.push_str("}\n");
     std::fs::write(format!("{out_dir}/skel.luau"), s).unwrap();
+    wipeout_state_section(out_dir, &mut r, sizes, bones, body_settings, &authored, spawn, simulation, &initial_bones, &initial_mapped, &drive_parents, drive_settings, drives_l);
+}
+
+// --- player::wipeout_state на настоящем теле скелета (данные игры, не в git).
+#[allow(clippy::too_many_arguments)]
+fn wipeout_state_section(out_dir: &str, r: &mut Rng, sizes: [Vector3; 24], bones: [BoneSettings; 24], body_settings: SkeletonBodySettings, authored: &[T; 24], spawn: T,
+    simulation: RetailSimulationStep, initial_bones: &[T; 24], initial_mapped: &[T; 24], drive_parents: &[Option<usize>; 24], drive_settings: SkeletonDriveSettings,
+    drives_l: fn(&SkeletonDrives) -> Raw) {
+    use skate_core::player::wipeout_state::{self as ws, State};
+    use skate_core::player::input_phase::ProcessedPhysicsInput;
+    use skate_core::point_graph::PointGraph;
+    let unit = |r: &mut Rng| { let v = r.vec(1.0); let l = (v.x * v.x + v.y * v.y + v.z * v.z).sqrt().max(1e-3); [v.x / l, v.y / l, v.z / l, 0.0] };
+    let v4z = |r: &mut Rng, span: f32| { let v = r.vec(span); [v.x, v.y, v.z, 0.0] };
+    let mut s = format!("-- Сгенерировано golden/src/skel.rs (wipeout_state) из настоящего skate-core. Не править.\n{HEADER}return {{\n");
+    let state_l = |st: &State| Raw(obj!(time = st.time, settled_time = st.settled_time, time_until_teleport = st.time_until_teleport, impaled_time = st.impaled_time,
+        no_support_time = st.no_support_time, response_time = st.response_time, extra_weight_zero_time = st.extra_weight_zero_time, slow_time = st.slow_time,
+        surface_height = st.surface_height, board_offset = st.board_offset, forward = st.forward, right = st.right, angular_velocity = st.angular_velocity,
+        retained_tilt = st.retained_tilt, velocity = st.velocity, retained_velocity = st.retained_velocity, predicted_position = st.predicted_position, over = st.over,
+        slow = st.slow, material_eleven_response = st.material_eleven_response, air_collision_mode = st.air_collision_mode, request_teleport = st.request_teleport,
+        move_board = st.move_board, special_surface = st.special_surface, below_surface = st.below_surface, retained_velocity_active = st.retained_velocity_active,
+        sideways_input = st.sideways_input, forward_input = st.forward_input, orientation = st.orientation, collision_weight = st.collision_weight,
+        controlled_weight = st.controlled_weight, control_time = st.control_time, retained_sideways_input = st.retained_sideways_input,
+        retained_forward_input = st.retained_forward_input, response_scalar = st.response_scalar, extra_weight = st.extra_weight, maximum_speed = st.maximum_speed,
+        response_start_speed = st.response_start_speed, response_change = st.response_change, board_move_frames = st.board_move_frames, response_count = st.response_count,
+        response_frames = st.response_frames, airborne_frames = st.airborne_frames, teleport_countdown = st.teleport_countdown, prevent_manual = st.prevent_manual,
+        ignore_reset = st.ignore_reset, reset_ever = st.reset_ever, ever_settled = st.ever_settled, recovery_eligible = st.recovery_eligible,
+        teleport_pending = st.teleport_pending, ever_impaled = st.ever_impaled, direction_initialized = st.direction_initialized,
+        material_ten_response = st.material_ten_response, imminent_surface_twelve = st.imminent_surface_twelve, allow_retained_velocity = st.allow_retained_velocity,
+        response_finished = st.response_finished, surface_query = st.surface_query, profile = st.profile, predicted_time = st.predicted_time));
+    let graph8 = |r: &mut Rng| { let mut x = [0.0f32; 8]; let mut acc = 0.0; for i in 0..8 { x[i] = acc; acc += r.range(0.05, 0.5); } PointGraph { x, y: std::array::from_fn(|_| r.range(0.0, 2.0)) } };
+    for case in 0..6 {
+        let mut body = SkeletonBody::new(SkeletonBodyDefinition::new(sizes, bones, body_settings, None).unwrap(), authored, spawn, simulation);
+        let mut drives = SkeletonDrives::new(initial_bones, initial_mapped, drive_parents, body.animation_to_world, spawn, simulation, drive_settings.clone()).unwrap();
+        // Разные позы записи: отпускаем тело и публикуем запись с разными досками.
+        let mut boards = Vec::new();
+        for _ in 0..(case % 3) { let board = rigid(r, 3.0); body.publish_physical_record(board); boards.push(board); }
+        let mut st = State::default();
+        st.velocity = v4z(r, 6.0);
+        st.maximum_speed = r.range(0.0, 15.0);
+        let (sv, sm) = (st.velocity, st.maximum_speed);
+        let profiles: [ws::profiles::Profile; 5] = std::array::from_fn(|_| ws::profiles::Profile { roll_axis: unit(r), horizontal_axis: unit(r), align_euler: [r.range(-90.0, 90.0), r.range(-90.0, 90.0), 0.0, 0.0],
+            spin_vs_time: graph8(r), direction_follow: r.range(0.0, 1.0), torque_velocity: r.range(0.0, 2.0), torque_distance: r.range(0.0, 2.0), spin_inertia: r.range(0.0, 1.0),
+            roll_on_ground: r.bool(), ground_roll_torque: r.range(0.0, 2.0), sideways_spin: r.range(-10.0, 10.0), forward_spin: r.range(-10.0, 10.0), horizontal_directed: r.bool(),
+            drift_maximum_speed: r.range(0.0, 5.0), drift_forward: r.range(0.0, 5.0), drift_sideways: r.range(0.0, 5.0), align_with_velocity: r.bool(),
+            align_ground_with_velocity: r.bool(), ground_align_torque: r.range(0.0, 2.0), tilt_degrees: r.range(0.0, 45.0), drift_drag: r.range(0.0, 1.0) });
+        let profile_l = |p: &ws::profiles::Profile| Raw(obj!(roll_axis = p.roll_axis, horizontal_axis = p.horizontal_axis, align_euler = p.align_euler, spin_vs_time = p.spin_vs_time,
+            direction_follow = p.direction_follow, torque_velocity = p.torque_velocity, torque_distance = p.torque_distance, spin_inertia = p.spin_inertia, roll_on_ground = p.roll_on_ground,
+            ground_roll_torque = p.ground_roll_torque, sideways_spin = p.sideways_spin, forward_spin = p.forward_spin, horizontal_directed = p.horizontal_directed,
+            drift_maximum_speed = p.drift_maximum_speed, drift_forward = p.drift_forward, drift_sideways = p.drift_sideways, align_with_velocity = p.align_with_velocity,
+            align_ground_with_velocity = p.align_ground_with_velocity, ground_align_torque = p.ground_align_torque, tilt_degrees = p.tilt_degrees, drift_drag = p.drift_drag));
+        let dsettings = ws::drives::Settings { bone: std::array::from_fn(|_| std::array::from_fn(|_| r.range(0.0, 1.5))), root: std::array::from_fn(|_| r.range(0.0, 1.5)),
+            strength: [r.range(100.0, 2000.0), r.range(100.0, 2000.0)], hook_spring: r.range(0.0, 50.0), hook_strength: r.range(0.0, 50.0), hook_damping: r.range(0.0, 5.0) };
+        let wsettings = ws::weights::Settings { remove_target_time: r.range(0.0, 1.0), remove_drives_time: if r.bool() { 0.0 } else { r.range(0.0, 1.0) }, collision_step: r.range(0.0, 0.2), controlled_step: r.range(0.0, 0.2) };
+        let rsettings = ws::recovery::Settings { minimum_time: r.range(0.0, 2.0), minimum_settled: r.range(0.0, 1.0), maximum_time: r.range(1.0, 5.0), fade_time: r.range(0.0, 1.0),
+            over_speed: r.range(0.1, 3.0), over_minimum_time: r.range(0.0, 1.0) };
+        let mut contact = ws::contact_response::ContactResponse::new();
+        let mut roots = SkeletonRootFrames::default();
+        let mut steps = Vec::new();
+        for _ in 0..40 {
+            let op = r.next() % 21;
+            let (a, b, c) = (v4z(r, 4.0), unit(r), r.range(-1.0, 3.0));
+            let input = [r.range(-1.0, 1.0), r.range(-1.0, 1.0)];
+            let gesture = if r.bool() { [0.0, 0.0] } else { [r.range(-1.0, 1.0), r.range(-1.0, 1.0)] };
+            let flags = [r.next(), r.next(), r.next()];
+            let contact_flag = r.bool();
+            let com = v4z(r, 2.0);
+            let effective = rigid(r, 2.0);
+            let pose: [T; 24] = std::array::from_fn(|_| noisy(r, 1.0));
+            let mut out = Raw("nil".into());
+            let pi = st.profile;
+            let (x1, u1, u2, v1) = (rigid(r, 2.0), unit(r), unit(r), v4z(r, 2.0));
+            match op {
+                0 => ws::body::set_velocity(&mut body, a),
+                1 => ws::body::add_velocity(&mut body, a),
+                2 => ws::body::remove_normal_velocity(&mut body, b),
+                3 => ws::body::blend_velocity(&mut body, a),
+                4 => ws::body::limit_velocity(&mut body, c.abs() * 2.0),
+                5 => { if contact_flag { ws::body::set_drag(&mut body, input[0].abs(), input[1].abs()) } else { ws::body::set_wipeout_drag(&mut body, c) } }
+                6 => ws::body::special_surface(&mut body, com[1] - 1.0),
+                7 => { let w = ws::torque::angular_velocity(&body.record, &body.definition.animation_masses.fractional); ws::torque::apply(&mut body, com, a); out = Raw(w.l()); }
+                8 => { let ok = ws::control_air::update(&mut st, &mut body, com, input, contact_flag); out = Raw(ok.l()); }
+                9 => { let mut processed = ProcessedPhysicsInput::default(); processed.vectors_464_480_496_512_528[0] = b.map(f32::to_bits);
+                    ws::control_ground::update(&mut st, &mut body, com, &effective, &processed, &profiles[pi], &x1, &pose); }
+                10 => ws::control_profile_air::update(&mut st, &mut body, com, &effective, input, &profiles[pi]),
+                11 => { ws::profiles::prepare(&mut st, &profiles, gesture, input); ws::profiles::drift(&st, &mut body, &profiles[st.profile]); }
+                12 => { let n = ws::response::response_normal(if contact_flag { Some(b) } else { None }, if gesture[0] > 0.0 { Some(u1) } else { None });
+                    ws::response::trigger(&mut st, &mut body, n, input); ws::response::update_counter(&mut st, contact_flag); out = Raw(n.l()); }
+                13 => { ws::response::update_counter(&mut st, contact_flag); ws::response::retained_velocity(&mut st, &mut body, &mut drives, &dsettings, contact_flag, flags[0] & 8, com); }
+                14 => { let w = ws::drives::Weights { start: r.range(0.0, 1.0), end: r.range(0.0, 1.0), controlled: r.range(0.0, 1.0), upper_extra: if r.bool() { 0.0 } else { r.unit() }, lower_extra: if r.bool() { 0.0 } else { r.unit() } };
+                    let res = ws::drives::update(&mut drives, &pose, &dsettings, w);
+                    out = Raw(obj!(weights = Raw(format!("{{ start = {}, [\"end\"] = {}, controlled = {}, upper_extra = {}, lower_extra = {} }}", w.start.l(), w.end.l(), w.controlled.l(), w.upper_extra.l(), w.lower_extra.l())), residual = res)); }
+                15 => { ws::drives::set_linear_root(&mut drives, &dsettings, c); ws::drives::set_angular_root(&mut drives, &dsettings, input[0]); }
+                16 => { let o = ws::weights::update(&mut st, wsettings, contact_flag, gesture[0] > 0.0, flags[1], gesture);
+                    out = Raw(format!("{{ target_weight = {}, start = {}, [\"end\"] = {}, controlled = {}, extra = {} }}", o.target_weight.l(), o.start.l(), o.end.l(), o.controlled.l(), o.extra.l())); }
+                17 => { st.time += 0.5; st.manage_recovery(flags[0] & 1, flags[1], flags[2], 1.0 / 60.0, &rsettings); st.post_physics(a, v1, contact_flag, &rsettings);
+                    out = Raw(st.response_strength().l()); }
+                18 => { ws::skeleton::update_roots(&mut roots, &pose[23], &x1, a, com, v1, c);
+                    out = Raw(obj!(a2w = roots.animation_to_world, w2a = roots.world_to_animation)); }
+                19 => { let o = contact.update(&mut body, ws::contact_response::ContactResponseInput { com_velocity_608: a, material10_normal: if contact_flag { Some(b) } else { None },
+                        material11_normal: if gesture[0] > 0.0 { Some(u1) } else { None }, effective_axis_224: u2, wipeout_control_2824_2828: input });
+                    out = Raw(obj!(material10_phase = o.material10_phase, material10_finished_77 = o.material10_finished_77, material11_active_73 = o.material11_active_73)); }
+                _ => { let o = st.output(&effective, b);
+                    out = Raw(obj!(over_599 = o.over_599, scalar_544 = o.scalar_544, no_support_time_548 = o.no_support_time_548, can_leave_72 = o.can_leave_72,
+                        collision_time_144 = o.collision_time_144, profile_148 = o.profile_148, retained = o.retained_air_velocity_160, change = o.response_change_588,
+                        teleport_countdown_68 = o.teleport_countdown_68, hips_right_angle_496 = o.hips_right_angle_496, hips_up_angle_500 = o.hips_up_angle_500,
+                        up = ws::orientation::alignment_up(a[0] * 20.0, a[1] * 20.0), projected = ws::orientation::projected_angle(a, b, u2))); }
+            }
+            steps.push(obj!(op = op, a = a, b = b, c = c, x1 = x1, u1 = u1, u2 = u2, v1 = v1, input = input, gesture = gesture, flags = flags, contact = contact_flag, com = com, effective = effective, pose = pose,
+                out = out, state = state_l(&st), body = body_l(&body), drives = drives_l(&drives)));
+        }
+        writeln!(s, "	{{ boards = {}, state_velocity = {}, state_maximum_speed = {}, case = {}, profiles = {}, drives = {}, weights = {}, recovery = {}, steps = {{ {} }} }},", boards.l(), sv.l(), sm.l(), case, profiles.iter().map(profile_l).collect::<Vec<_>>().l(),
+            obj!(bone = dsettings.bone, root = dsettings.root, strength = dsettings.strength, hook_spring = dsettings.hook_spring, hook_strength = dsettings.hook_strength, hook_damping = dsettings.hook_damping),
+            obj!(remove_target_time = wsettings.remove_target_time, remove_drives_time = wsettings.remove_drives_time, collision_step = wsettings.collision_step, controlled_step = wsettings.controlled_step),
+            obj!(minimum_time = rsettings.minimum_time, minimum_settled = rsettings.minimum_settled, maximum_time = rsettings.maximum_time, fade_time = rsettings.fade_time,
+                over_speed = rsettings.over_speed, over_minimum_time = rsettings.over_minimum_time), steps.join(",\n\t\t")).unwrap();
+    }
+    s.push_str("}\n");
+    std::fs::write(format!("{out_dir}/wst.luau"), s).unwrap();
 }
