@@ -7,8 +7,6 @@
 -- contact admission and lifecycle are separate from these force calculations.
 -- ROBLOX: V = [f32; 4] -> таблица из 4 чисел (Rust v[1] -> v[2]); Option -> значение или nil.
 -- Приватные sub/scale/length/reciprocal открыты подмодулям через поле parent.
--- TODO: подмодуль post (нужен player::wipeout) будет добавлен, когда его
--- зависимость будет портирована.
 
 local rt = require("../../rt")
 local native_arithmetic = require("./native_arithmetic")
@@ -21,6 +19,7 @@ local launch = require("@self/launch")
 local orientation = require("@self/orientation")
 local support = require("@self/support")
 local reckoning = require("@self/reckoning")
+local post = require("@self/post")
 
 local f32 = rt.f32
 local mul_add = rt.mul_add
@@ -38,6 +37,7 @@ grind_forces.launch = launch
 grind_forces.orientation = orientation
 grind_forces.support = support
 grind_forces.reckoning = reckoning
+grind_forces.post = post
 
 local function sub(a: V, b: V): V
 	return { f32(a[1] - b[1]), f32(a[2] - b[2]), f32(a[3] - b[3]), f32(a[4] - b[4]) }

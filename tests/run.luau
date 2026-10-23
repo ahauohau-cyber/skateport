@@ -50,6 +50,7 @@ local specs = {
 	require("./skate_core/air/reckoning.spec"),
 	require("./skate_core/air/state_known.spec"),
 	require("./skate_core/physics/startup.spec"),
+	require("./skate_core/player/wipeout.spec"),
 }
 
 local report = harness.new()
