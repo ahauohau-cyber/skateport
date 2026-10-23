@@ -37,6 +37,7 @@ mod grind;
 mod gforce;
 mod airrk;
 mod gjump;
+mod startup;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -155,6 +156,7 @@ fn main() {
     gforce::write(&out_dir);
     airrk::write(&out_dir);
     gjump::write(&out_dir);
+    startup::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
