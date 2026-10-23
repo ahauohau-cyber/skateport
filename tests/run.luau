@@ -44,6 +44,7 @@ local specs = {
 	require("./skate_core/physics/phys3.spec"),
 	require("./skate_data/data2.spec"),
 	require("./skate_game/graph_runtime.spec"),
+	require("./skate_core/air/trajectory.spec"),
 }
 
 local report = harness.new()
