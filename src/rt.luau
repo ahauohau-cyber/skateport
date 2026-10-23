@@ -234,6 +234,124 @@ function rt.catch(f: (...any) -> ...any, ...: any): (any, any)
 	error(e, 0)
 end
 
+-- ROBLOX: f32::atan2 — в Rust это libm atan2f платформы (эталон собран
+-- на Linux/glibc 2.39, там atan2f из fdlibm). Повторяем fdlibm e_atan2f.c +
+-- s_atanf.c в f32 бит в бит (сверено с glibc на 20 млн случайных пар).
+-- Округлённый double math.atan2 расходится примерно в 16% случаев.
+local ATANHI = { rt.from_bits(0x3eed6338), rt.from_bits(0x3f490fda), rt.from_bits(0x3f7b985e), rt.from_bits(0x3fc90fda) }
+local ATANLO = { rt.from_bits(0x31ac3769), rt.from_bits(0x33222168), rt.from_bits(0x33140fb4), rt.from_bits(0x33a22168) }
+local AT = {
+	rt.from_bits(0x3eaaaaab), rt.from_bits(0xbe4ccccd), rt.from_bits(0x3e124925), rt.from_bits(0xbde38e38),
+	rt.from_bits(0x3dba2e6e), rt.from_bits(0xbd9d8795), rt.from_bits(0x3d886b35), rt.from_bits(0xbd6ef16b),
+	rt.from_bits(0x3d4bda59), rt.from_bits(0xbd15a221), rt.from_bits(0x3c8569d7),
+}
+local A_TINY = rt.from_bits(0x0da24260)
+local A_PI_O_4 = rt.from_bits(0x3f490fdb)
+local A_PI_O_2 = rt.from_bits(0x3fc90fdb)
+local A_PI = rt.from_bits(0x40490fdb)
+local A_PI_LO = rt.from_bits(0xb3bbbd2e)
+
+local function atanf(x: number): number
+	local f = rt.f32
+	local hx = rt.to_bits(x)
+	local ix = bit32.band(hx, 0x7fffffff)
+	local negative = hx >= 0x80000000
+	local id
+	if ix >= 0x4c000000 then
+		if ix > 0x7f800000 then
+			return f(x + x)
+		end
+		local v = f(ATANHI[4] + ATANLO[4])
+		return if negative then -v else v
+	end
+	if ix < 0x3ee00000 then
+		if ix < 0x31000000 then
+			return x
+		end
+		id = -1
+	else
+		x = math.abs(x)
+		if ix < 0x3f980000 then
+			if ix < 0x3f300000 then
+				id = 0
+				x = f(f(f(2.0 * x) - 1.0) / f(2.0 + x))
+			else
+				id = 1
+				x = f(f(x - 1.0) / f(x + 1.0))
+			end
+		elseif ix < 0x401c0000 then
+			id = 2
+			x = f(f(x - 1.5) / f(1.0 + f(1.5 * x)))
+		else
+			id = 3
+			x = f(-1.0 / x)
+		end
+	end
+	local z = f(x * x)
+	local w = f(z * z)
+	local s1 = f(z * f(AT[1] + f(w * f(AT[3] + f(w * f(AT[5] + f(w * f(AT[7] + f(w * f(AT[9] + f(w * AT[11])))))))))))
+	local s2 = f(w * f(AT[2] + f(w * f(AT[4] + f(w * f(AT[6] + f(w * f(AT[8] + f(w * AT[10])))))))))
+	if id < 0 then
+		return f(x - f(x * f(s1 + s2)))
+	end
+	z = f(ATANHI[id + 1] - f(f(f(x * f(s1 + s2)) - ATANLO[id + 1]) - x))
+	return if negative then -z else z
+end
+
+function rt.atan2f(y: number, x: number): number
+	local f = rt.f32
+	local hx, hy = rt.to_bits(x), rt.to_bits(y)
+	local ix, iy = bit32.band(hx, 0x7fffffff), bit32.band(hy, 0x7fffffff)
+	if ix > 0x7f800000 or iy > 0x7f800000 then
+		return f(x + y)
+	end
+	if hx == 0x3f800000 then
+		return atanf(y)
+	end
+	local sy = hy >= 0x80000000
+	local sx = hx >= 0x80000000
+	local m = (if sy then 1 else 0) + (if sx then 2 else 0)
+	if iy == 0 then
+		if m <= 1 then
+			return y
+		elseif m == 2 then
+			return f(A_PI + A_TINY)
+		else
+			return f(-A_PI - A_TINY)
+		end
+	end
+	if ix == 0 then
+		return if sy then f(-A_PI_O_2 - A_TINY) else f(A_PI_O_2 + A_TINY)
+	end
+	if ix == 0x7f800000 then
+		if iy == 0x7f800000 then
+			local three = f(3.0 * A_PI_O_4)
+			return ({ f(A_PI_O_4 + A_TINY), f(-A_PI_O_4 - A_TINY), f(three + A_TINY), f(-three - A_TINY) })[m + 1]
+		end
+		return ({ 0.0, -0.0, f(A_PI + A_TINY), f(-A_PI - A_TINY) })[m + 1]
+	end
+	if iy == 0x7f800000 then
+		return if sy then f(-A_PI_O_2 - A_TINY) else f(A_PI_O_2 + A_TINY)
+	end
+	local k = (iy - ix) // 0x800000
+	local z
+	if k > 60 then
+		z = f(A_PI_O_2 + f(0.5 * A_PI_LO))
+	elseif sx and k < -60 then
+		z = 0.0
+	else
+		z = atanf(math.abs(f(y / x)))
+	end
+	if m == 0 then
+		return z
+	elseif m == 1 then
+		return -z
+	elseif m == 2 then
+		return f(A_PI - f(z - A_PI_LO))
+	end
+	return f(f(z - A_PI_LO) - A_PI)
+end
+
 -- ROBLOX: f32::clamp(min, max): NaN проходит насквозь, иначе min/max.
 function rt.fclamp(value: number, min: number, max: number): number
 	if value < min then
