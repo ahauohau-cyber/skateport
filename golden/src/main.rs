@@ -24,6 +24,7 @@ mod riding3;
 mod lua;
 mod grounded;
 mod input;
+mod graph;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -129,6 +130,7 @@ fn main() {
     riding3::write(&out_dir);
     grounded::write(&out_dir);
     input::write(&out_dir);
+    graph::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
