@@ -213,6 +213,27 @@ function rt.to_i32(value: number): number
 	return wrapped
 end
 
+-- ROBLOX: Result<T, E> и оператор `?` в цепочке функций.
+-- rt.raise(e) прерывает выполнение ошибкой-результатом (как `return Err(e)`
+-- через несколько уровней `?`); rt.catch(f, ...) возвращает (значение) или
+-- (nil, e). Записи, сделанные до ошибки, остаются, как в Rust. Ошибки Luau,
+-- не созданные через raise, пробрасываются дальше как есть.
+local RESULT_ERROR = {}
+function rt.raise(err: any): never
+	error({ [RESULT_ERROR] = true, value = err }, 0)
+end
+function rt.catch(f: (...any) -> ...any, ...: any): (any, any)
+	local results = table.pack(pcall(f, ...))
+	if results[1] then
+		return results[2], nil
+	end
+	local e = results[2]
+	if type(e) == "table" and e[RESULT_ERROR] then
+		return nil, e.value
+	end
+	error(e, 0)
+end
+
 -- ROBLOX: f32::clamp(min, max): NaN проходит насквозь, иначе min/max.
 function rt.fclamp(value: number, min: number, max: number): number
 	if value < min then
