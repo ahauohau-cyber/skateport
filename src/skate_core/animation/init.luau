@@ -4,9 +4,9 @@
 -- Оригинал Rust-файла: crates/skate-core/src/animation/mod.rs (коммит 2e16697)
 --
 -- Animation timing and event semantics recovered from Skate 3 TU3.
--- TODO: foot_ik переносится следующим шагом (этап B).
 
 return {
+	foot_ik = require("@self/foot_ik"),
 	clip_clock = require("@self/clip_clock"),
 	commands = require("@self/commands"),
 	output = require("@self/output"),

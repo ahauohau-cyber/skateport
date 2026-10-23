@@ -15,3 +15,4 @@ _gamedata/
 src/skate_data/stock_files/
 tests/golden/anim3.luau
 tests/golden/skel.luau
+tests/golden/skel2.luau

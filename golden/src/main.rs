@@ -29,6 +29,7 @@ mod anim1;
 mod anim2;
 mod anim3;
 mod skel;
+mod skel2;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -139,6 +140,7 @@ fn main() {
     anim2::write(&out_dir);
     anim3::write(&out_dir, &std::env::var("SKATE3_ASSET_ROOT").unwrap());
     skel::write(&out_dir, &std::env::var("SKATE3_ASSET_ROOT").unwrap());
+    skel2::write(&out_dir, &std::env::var("SKATE3_ASSET_ROOT").unwrap());
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
