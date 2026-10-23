@@ -35,6 +35,7 @@ mod phys3;
 mod traj;
 mod grind;
 mod gforce;
+mod airrk;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -151,6 +152,7 @@ fn main() {
     traj::write(&out_dir);
     grind::write(&out_dir);
     gforce::write(&out_dir);
+    airrk::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.

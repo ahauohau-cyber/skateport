@@ -47,6 +47,7 @@ local specs = {
 	require("./skate_core/air/trajectory.spec"),
 	require("./skate_core/physics/grind_contact.spec"),
 	require("./skate_core/physics/grind_forces.spec"),
+	require("./skate_core/air/reckoning.spec"),
 }
 
 local report = harness.new()
