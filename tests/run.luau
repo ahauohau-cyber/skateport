@@ -25,6 +25,7 @@ local specs = {
 	require("./skate_core/physics/board_ground.spec"),
 	require("./skate_core/riding/reckoning.spec"),
 	require("./skate_core/riding/riding_forces.spec"),
+	require("./skate_core/riding/riding_push.spec"),
 	require("./skate_data/data.spec"),
 	require("./skate_game/physics/settings.spec"),
 	require("./skate_game/physics/colliders.spec"),

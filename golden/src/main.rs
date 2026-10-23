@@ -19,6 +19,7 @@ mod board_ground;
 mod reckoning;
 mod riding_outputs;
 mod riding2;
+mod riding3;
 
 fn angles() -> Vec<f32> {
     let mut v = vec![
@@ -121,6 +122,7 @@ fn main() {
     reckoning::write(&out_dir);
     riding_outputs::write(&out_dir);
     riding2::write(&out_dir);
+    riding3::write(&out_dir);
 }
 
 // PointGraph параметризован длиной N, поэтому вызываем его для каждой длины отдельно.
