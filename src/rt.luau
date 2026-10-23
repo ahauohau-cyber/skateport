@@ -213,6 +213,17 @@ function rt.to_i32(value: number): number
 	return wrapped
 end
 
+-- ROBLOX: f32::clamp(min, max): NaN проходит насквозь, иначе min/max.
+function rt.fclamp(value: number, min: number, max: number): number
+	if value < min then
+		value = min
+	end
+	if value > max then
+		value = max
+	end
+	return value
+end
+
 -- ROBLOX: `x as i32` для float: отбрасывание дробной части к нулю,
 -- насыщение до границ i32, NaN -> 0 (правила Rust).
 function rt.float_as_i32(value: number): number
