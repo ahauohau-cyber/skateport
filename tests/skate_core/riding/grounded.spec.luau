@@ -184,7 +184,7 @@ return function(report: harness.Report)
 		end
 	end)
 
-	harness.test(report, "grounded/board: 60 × 20 update (обычная, анимация, столкновение) vs Rust", function()
+	harness.test(report, "grounded/board: 25 × 20 update (обычная, анимация, столкновение) vs Rust", function()
 		for ci, c in golden.board do
 			local state = data.PhysicsGroundState.clone(c.init.state)
 			local wob = speed_wobble.SpeedWobbleState.new()
