@@ -12,3 +12,5 @@ tests/golden/riding_outputs.luau
 
 # Папка с данными игры у пользователя (копия установки skate3rust)
 _gamedata/
+src/skate_data/stock_files/
+tests/golden/anim3.luau
