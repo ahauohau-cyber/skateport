@@ -39,6 +39,7 @@ local specs = {
 	require("./skate_core/animation/anim1.spec"),
 	require("./skate_core/animation/anim2.spec"),
 	require("./skate_core/animation/anim3.spec"),
+	require("./skate_core/physics/skeleton.spec"),
 }
 
 local report = harness.new()
