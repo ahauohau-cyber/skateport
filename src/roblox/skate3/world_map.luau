@@ -32,7 +32,8 @@ function world_map.default_filter(part: BasePart): boolean
 	end
 	local model = part:FindFirstAncestorOfClass("Model")
 	while model ~= nil do
-		if model:FindFirstChildOfClass("Humanoid") ~= nil or model:GetAttribute("SkateIgnore") == true then
+		-- Персонажи: Humanoid или AnimationController (свои риги на костях).
+		if model:FindFirstChildOfClass("Humanoid") ~= nil or model:FindFirstChildOfClass("AnimationController") ~= nil or model:GetAttribute("SkateIgnore") == true then
 			return false
 		end
 		model = model:FindFirstAncestorOfClass("Model")

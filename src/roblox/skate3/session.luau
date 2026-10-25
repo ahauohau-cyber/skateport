@@ -24,6 +24,7 @@ local engine = require(script.Parent.engine)
 local world_map = require(script.Parent.world_map)
 local board_model = require(script.Parent.board_model)
 local r15_pose = require(script.Parent.r15_pose)
+local bone_pose = require(script.Parent.bone_pose)
 local speed_glitch = require(script.Parent.speed_glitch)
 local keyboard_pad = require(script.Parent.Parent.keyboard_pad)
 local fixed_step = require(script.Parent.Parent.fixed_step)
@@ -74,6 +75,7 @@ export type Session = {
 	hips_index: number?,
 	christ_held: boolean,
 	pose_override: r15_pose.Override?,
+	custom: bone_pose.Rig?, -- своя модель на костях вместо аватара (тест)
 	glitch_watch: number, -- тиков осталось мерить скорость после глитча
 	glitch_best: number,
 }
@@ -285,6 +287,7 @@ function session.start(player: Player): Session?
 		hips_index = nil,
 		christ_held = false,
 		pose_override = nil,
+		custom = nil,
 		glitch_watch = 0,
 		glitch_best = 0,
 	}
@@ -296,6 +299,23 @@ function session.start(player: Player): Session?
 	self.rig = r15_pose.bind(character, result.bone_names, engine.STUDS_PER_METRE)
 	if self.rig == nil then
 		warn("skate3: персонаж не R15 — поза не переносится, видна только доска")
+	end
+	-- Своя модель вместо аватара: атрибут игрока SkateRig = имя модели в
+	-- Workspace или ReplicatedStorage (по умолчанию CustomRig, если такая есть;
+	-- SkateRig = "none" — без неё).
+	local rig_name = player:GetAttribute("SkateRig")
+	if type(rig_name) ~= "string" then
+		rig_name = "CustomRig"
+	end
+	local template = workspace:FindFirstChild(rig_name :: string) or game:GetService("ReplicatedStorage"):FindFirstChild(rig_name :: string)
+	if template and template:IsA("Model") then
+		local ok, custom = pcall(bone_pose.bind, template, result.bone_names, workspace)
+		if ok and custom then
+			self.custom = custom
+			bone_pose.hide(custom, character)
+		elseif not ok then
+			warn("skate3: модель " .. (rig_name :: string) .. ": " .. tostring(custom))
+		end
 	end
 
 	humanoid.PlatformStand = true
@@ -384,14 +404,18 @@ function session.start(player: Player): Session?
 
 		local a, b = self.previous :: Snapshot, self.current :: Snapshot
 		board_model.place(self.board, a.deck:Lerp(b.deck, alpha))
+		local bones = self.render_bones
+		for i, cf in b.bones do
+			local from = a.bones[i]
+			bones[i] = if from then from:Lerp(cf, alpha) else cf
+		end
 		if self.rig then
-			local bones = self.render_bones
-			for i, cf in b.bones do
-				local from = a.bones[i]
-				bones[i] = if from then from:Lerp(cf, alpha) else cf
-			end
 			r15_pose.apply(self.rig, bones, nil)
 			self.pose_override = nil
+		end
+		if self.custom and #self.render_bones > 0 then
+			bone_pose.apply(self.custom, self.render_bones)
+			bone_pose.keep_hidden(self.custom)
 		end
 		update_camera(self, dt)
 
@@ -450,6 +474,10 @@ function session.stop(self: Session)
 	board_model.destroy(self.board)
 	if self.rig then
 		r15_pose.reset(self.rig)
+	end
+	if self.custom then
+		bone_pose.destroy(self.custom)
+		self.custom = nil
 	end
 	local humanoid = self.humanoid
 	local root = self.character:FindFirstChild("HumanoidRootPart") :: BasePart?

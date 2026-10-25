@@ -88,7 +88,7 @@ function r15_pose.bind(character: Model, bone_names: { string }, studs_per_metre
 	return { character = character, root = root, joints = joints, index = index, leg_scale = nil, studs_per_metre = studs_per_metre, kinematic = kinematic }
 end
 
-local function pos(rig: Rig, bones: Bones, name: string): Vector3
+local function pos(rig: any, bones: Bones, name: string): Vector3
 	return bones[rig.index[name]].Position
 end
 
@@ -123,7 +123,9 @@ local function bend_axis(upper_up: Vector3, lower_dir: Vector3, is_leg: boolean,
 end
 
 -- Желаемые мировые ориентации частей (только поворот).
-local function orientations(rig: Rig, bones: Bones): ({ [string]: CFrame }, Vector3)
+-- rig здесь нужен только ради rig.index (имя кости -> индекс), поэтому
+-- функцию использует и bone_pose (свои риги на Bone).
+local function orientations(rig: any, bones: Bones): ({ [string]: CFrame }, Vector3)
 	local hips = pos(rig, bones, "HIPS")
 	local spine1 = pos(rig, bones, "SPINE1")
 	local neck = pos(rig, bones, "NECK")
@@ -170,6 +172,8 @@ local function orientations(rig: Rig, bones: Bones): ({ [string]: CFrame }, Vect
 	end
 	return out, hips
 end
+
+r15_pose.orientations = orientations
 
 -- Длина ноги аватара по суставам (бедро -> колено -> голеностоп) / та же у скейтера.
 local function leg_scale(rig: Rig, bones: Bones): number
