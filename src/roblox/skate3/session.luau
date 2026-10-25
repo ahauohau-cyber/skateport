@@ -409,7 +409,9 @@ function session.start(player: Player): Session?
 	end
 	local template = workspace:FindFirstChild(rig_name :: string) or game:GetService("ReplicatedStorage"):FindFirstChild(rig_name :: string)
 	if template and template:IsA("Model") then
-		local ok, custom = pcall(bone_pose.bind, template, result.bone_names, workspace)
+		local ok, custom = pcall(function()
+			return bone_pose.bind(template :: Model, result.bone_names, workspace, engine.reference_pose(result, "RIG_TPOSE"))
+		end)
 		if ok and custom then
 			self.custom = custom
 			bone_pose.hide(custom, character)

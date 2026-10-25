@@ -264,6 +264,34 @@ function engine.deck_cframe(self: Engine): CFrame
 	):Orthonormalize()
 end
 
+-- Эталонная поза скелета скейтера (например "RIG_TPOSE") в пространстве модели:
+-- CFrame каждой кости в стадах (те же индексы, что bone_names). В данных у кости
+-- масштаб(3), кватернион x,y,z,w(4), сдвиг(3) — относительно родителя (как sqt
+-- в skate_game/animation_pose).
+function engine.reference_pose(self: Engine, name: string): { CFrame }
+	local frames = self.skater.animation.evaluator.frames
+	local samples = self.import("skate_data/animation_frames").AnimationFrames.named_pose(frames, name).samples
+	local bits = buffer.create(4)
+	local function f(word: number): number
+		buffer.writeu32(bits, 0, word)
+		return buffer.readf32(bits, 0)
+	end
+	local s = engine.STUDS_PER_METRE
+	local out: { CFrame } = table.create(#frames.parents)
+	for i, parent in frames.parents do
+		local w = samples[i]
+		local qx, qy, qz, qw = f(w[4]), f(w[5]), f(w[6]), f(w[7])
+		local tx, ty, tz = f(w[8]) * s, f(w[9]) * s, f(w[10]) * s
+		local l = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+		if l < 1e-9 then
+			qx, qy, qz, qw, l = 0, 0, 0, 1, 1
+		end
+		local local_cf = CFrame.new(tx, ty, tz, qx / l, qy / l, qz / l, qw / l)
+		out[i] = if parent >= 0 then out[parent + 1] * local_cf else local_cf
+	end
+	return out
+end
+
 -- Мировая высота (метры) одной кости по индексу bone_names — дёшево, без всей позы.
 function engine.bone_height(self: Engine, index: number): number
 	local anim = self.modules.animation

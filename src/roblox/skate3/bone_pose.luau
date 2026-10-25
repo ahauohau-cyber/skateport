@@ -2,28 +2,36 @@
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- ROBLOX: перенос позы скейтера на свою модель со скиннингом (кости Bone),
 -- например MMD-персонажа: один MeshPart и дерево костей
--- Hips → Spine → Chest → Neck → Head, Right arm/elbow/wrist, Right leg/knee/ankle/toe.
+-- Hips → Spine → Chest → Neck → Head, Right shoulder/arm/elbow/wrist,
+-- Right leg/knee/ankle/toe.
 --
--- Ориентации частей тела берём те же, что для R15 (r15_pose.orientations).
--- Для каждой части строим такую же рамку по позе покоя модели и поворачиваем
--- кость на разницу «рамка скейтера × рамка покоя⁻¹». Так модель в любой позе
--- покоя (T, A) повторяет движения скейтера. Пальцы, волосы, одежда — просто
--- едут за родительскими костями.
-
-local r15_pose = require(script.Parent.r15_pose)
+-- Переносим полные повороты костей скейтера (с кистью и скручиванием руки),
+-- а не восстанавливаем их по позициям: по позициям не видно, как повёрнута
+-- кисть, а у прямой руки нет оси сгиба — отсюда были дёрганья рук, когда
+-- персонаж держит, бросает или подзывает доску и встаёт.
+--
+-- Связка двух скелетов — через T-позу скейтера из данных игры (RIG_TPOSE):
+--   1. G — общий поворот «T-поза скейтера → поза покоя модели» по тазу и спине;
+--   2. A — для каждой кости поворот, который ставит её из позы покоя модели
+--      (часто A-поза) в направление той же кости в T-позе скейтера;
+--   3. каждый кадр: поворот кости модели = поворот кости скейтера ×
+--      (её поворот в T-позе)⁻¹ × G⁻¹ × A × поворот кости модели в покое.
+-- Пальцы, волосы, одежда — едут за родительскими костями.
 
 local bone_pose = {}
 
--- Имена костей (сравниваем без регистра, пробелов, точек и подчёркиваний).
+-- Имена костей модели (сравниваем без регистра, пробелов, точек и подчёркиваний).
 local NAMES: { [string]: { string } } = {
 	hips = { "hips", "pelvis" },
 	spine = { "spine", "spine1", "abdomen", "lowerspine" },
 	chest = { "chest", "upperchest", "spine2", "upperspine" },
 	neck = { "neck" },
 	head = { "head" },
+	r_shoulder = { "rightshoulder", "shoulderr", "rightclavicle", "clavicler" },
 	r_arm = { "rightarm", "rightupperarm", "upperarmr", "armr" },
 	r_elbow = { "rightelbow", "rightforearm", "rightlowerarm", "lowerarmr", "forearmr", "elbowr" },
 	r_wrist = { "rightwrist", "righthand", "handr", "wristr" },
+	l_shoulder = { "leftshoulder", "shoulderl", "leftclavicle", "claviclel" },
 	l_arm = { "leftarm", "leftupperarm", "upperarml", "arml" },
 	l_elbow = { "leftelbow", "leftforearm", "leftlowerarm", "lowerarml", "forearml", "elbowl" },
 	l_wrist = { "leftwrist", "lefthand", "handl", "wristl" },
@@ -37,25 +45,31 @@ local NAMES: { [string]: { string } } = {
 	l_toe = { "lefttoe", "lefttoebase", "lefttoes", "toel", "toebasel" },
 }
 
--- Какая кость какой частью тела R15 управляется.
-local ROLES: { { string } } = {
-	{ "hips", "LowerTorso" },
-	{ "spine", "UpperTorso" },
-	{ "chest", "UpperTorso" },
-	{ "neck", "Head" },
-	{ "head", "Head" },
-	{ "r_arm", "RightUpperArm" },
-	{ "r_elbow", "RightLowerArm" },
-	{ "r_wrist", "RightHand" },
-	{ "l_arm", "LeftUpperArm" },
-	{ "l_elbow", "LeftLowerArm" },
-	{ "l_wrist", "LeftHand" },
-	{ "r_leg", "RightUpperLeg" },
-	{ "r_knee", "RightLowerLeg" },
-	{ "r_ankle", "RightFoot" },
-	{ "l_leg", "LeftUpperLeg" },
-	{ "l_knee", "LeftLowerLeg" },
-	{ "l_ankle", "LeftFoot" },
+-- Слот модели -> кость скейтера; child — по какой паре костей выравнивать
+-- направление (слот модели, кость скейтера). Без child — поворот A родителя.
+type Slot = { slot: string, skater: string, child: string?, skater_child: string?, inherit: string? }
+local SLOTS: { Slot } = {
+	{ slot = "hips", skater = "HIPS", child = "spine", skater_child = "SPINE1" },
+	{ slot = "spine", skater = "SPINE1", child = "chest", skater_child = "SPINE3" },
+	{ slot = "chest", skater = "SPINE3", child = "neck", skater_child = "NECK" },
+	{ slot = "neck", skater = "NECK", child = "head", skater_child = "HEAD" },
+	{ slot = "head", skater = "HEAD", inherit = "neck" },
+	{ slot = "r_shoulder", skater = "RIGHTSHOULDER", child = "r_arm", skater_child = "RIGHTARM" },
+	{ slot = "r_arm", skater = "RIGHTARM", child = "r_elbow", skater_child = "RIGHTFOREARM" },
+	{ slot = "r_elbow", skater = "RIGHTFOREARM", child = "r_wrist", skater_child = "RIGHTHAND" },
+	{ slot = "r_wrist", skater = "RIGHTHAND", inherit = "r_elbow" },
+	{ slot = "l_shoulder", skater = "LEFTSHOULDER", child = "l_arm", skater_child = "LEFTARM" },
+	{ slot = "l_arm", skater = "LEFTARM", child = "l_elbow", skater_child = "LEFTFOREARM" },
+	{ slot = "l_elbow", skater = "LEFTFOREARM", child = "l_wrist", skater_child = "LEFTHAND" },
+	{ slot = "l_wrist", skater = "LEFTHAND", inherit = "l_elbow" },
+	{ slot = "r_leg", skater = "RIGHTUPLEG", child = "r_knee", skater_child = "RIGHTLEG" },
+	{ slot = "r_knee", skater = "RIGHTLEG", child = "r_ankle", skater_child = "RIGHTFOOT" },
+	{ slot = "r_ankle", skater = "RIGHTFOOT", child = "r_toe", skater_child = "RIGHTTOEBASE" },
+	{ slot = "r_toe", skater = "RIGHTTOEBASE", inherit = "r_ankle" },
+	{ slot = "l_leg", skater = "LEFTUPLEG", child = "l_knee", skater_child = "LEFTLEG" },
+	{ slot = "l_knee", skater = "LEFTLEG", child = "l_ankle", skater_child = "LEFTFOOT" },
+	{ slot = "l_ankle", skater = "LEFTFOOT", child = "l_toe", skater_child = "LEFTTOEBASE" },
+	{ slot = "l_toe", skater = "LEFTTOEBASE", inherit = "l_ankle" },
 }
 
 export type Rig = {
@@ -63,9 +77,9 @@ export type Rig = {
 	root: BasePart,
 	root_rotation: CFrame, -- поворот корневой детали в покое
 	order: { Bone }, -- кости, которые считаем (сверху вниз)
-	role: { [Bone]: string }, -- кость -> часть R15
-	rest_world: { [Bone]: CFrame }, -- поворот кости в мире в покое
-	rest_frame: { [string]: CFrame }, -- рамка части R15 в покое
+	source: { [Bone]: number }, -- кость модели -> индекс кости скейтера
+	offset: { [Bone]: CFrame }, -- (T-поза скейтера)⁻¹ × G⁻¹ × A × покой модели
+	rest_world: { [Bone]: CFrame }, -- поворот кости модели в покое (мир)
 	hips: Bone,
 	hips_local: Vector3, -- кость Hips в осях корневой детали (покой)
 	hips_offset: Vector3, -- кость Hips минус середина бёдер (мир, покой)
@@ -87,19 +101,6 @@ local function unit(v: Vector3, fallback: Vector3): Vector3
 	return v / l
 end
 
--- Как frame в r15_pose: Y вдоль кости, X — ортогонализованная подсказка.
-local function frame(y: Vector3, x_hint: Vector3): CFrame
-	local x = x_hint - y * x_hint:Dot(y)
-	if x.Magnitude < 1e-4 then
-		x = Vector3.xAxis - y * y.X
-		if x.Magnitude < 1e-4 then
-			x = Vector3.zAxis - y * y.Z
-		end
-	end
-	x = x.Unit
-	return CFrame.fromMatrix(Vector3.zero, x, y, x:Cross(y))
-end
-
 -- Кратчайший поворот, переводящий направление a в b.
 local function swing(a: Vector3, b: Vector3): CFrame
 	local axis = a:Cross(b)
@@ -108,26 +109,26 @@ local function swing(a: Vector3, b: Vector3): CFrame
 		if c > 0 then
 			return CFrame.identity
 		end
-		return CFrame.fromAxisAngle(Vector3.zAxis, math.pi)
+		local any = if math.abs(a.X) < 0.9 then Vector3.xAxis else Vector3.yAxis
+		return CFrame.fromAxisAngle(a:Cross(any).Unit, math.pi)
 	end
 	return CFrame.fromAxisAngle(axis.Unit, math.acos(c))
 end
 
--- Рамка конечности в покое: X — «вправо» висящей конечности, повёрнутое
--- вместе с ней (так одинаково работают T- и A-поза).
-local function limb_rest(y: Vector3, right: Vector3): CFrame
-	return frame(y, swing(Vector3.yAxis, y):VectorToWorldSpace(right))
+-- Рамка тела: X — вправо (бёдра), Y — вверх (таз → шея).
+local function body_frame(right: Vector3, up: Vector3): CFrame
+	local y = unit(up, Vector3.yAxis)
+	local x = unit(right - y * right:Dot(y), Vector3.xAxis)
+	return CFrame.fromMatrix(Vector3.zero, x, y, x:Cross(y))
 end
 
-local function foot_frame(ankle: Vector3, toe: Vector3, right: Vector3): CFrame
-	local forward = unit(toe - ankle, -Vector3.zAxis)
-	local x = unit(right - forward * right:Dot(forward), right)
-	local y = (-forward):Cross(x)
-	return CFrame.fromMatrix(Vector3.zero, x, y, -forward)
-end
-
--- Найти модель-риг: корневая деталь с костями внутри.
-function bone_pose.bind(template: Model, bone_names: { string }, parent: Instance): Rig?
+-- Собрать риг из модели-шаблона. tpose — CFrame костей скейтера в T-позе
+-- (engine.reference_pose(e, "RIG_TPOSE")), bone_names — имена костей скейтера.
+function bone_pose.bind(template: Model, bone_names: { string }, parent: Instance, tpose: { CFrame }): Rig?
+	local index: { [string]: number } = {}
+	for i, name in bone_names do
+		index[string.upper(name)] = i
+	end
 	local model = template:Clone()
 	-- Свою анимацию у клона выключаем: позу ставим только мы.
 	for _, d in model:GetDescendants() do
@@ -135,7 +136,6 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 			d:Destroy()
 		end
 	end
-	local found: { [string]: Bone } = {}
 	local by_key: { [string]: Bone } = {}
 	for _, d in model:GetDescendants() do
 		if d:IsA("Bone") then
@@ -145,6 +145,7 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 			end
 		end
 	end
+	local found: { [string]: Bone } = {}
 	for slot, names in NAMES do
 		for _, n in names do
 			local b = by_key[n]
@@ -161,16 +162,13 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 			return nil
 		end
 	end
-	found.spine = found.spine or found.chest
-	found.head = found.head or found.neck
 
 	-- Корневая деталь, в которой висят кости.
-	local root: BasePart? = nil
 	local p = found.hips.Parent
 	while p and not p:IsA("BasePart") do
 		p = p.Parent
 	end
-	root = p :: BasePart?
+	local root = p :: BasePart?
 	if root == nil then
 		model:Destroy()
 		return nil
@@ -187,11 +185,10 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 	model.Name = template.Name .. "_skate"
 	model.Parent = parent
 
-	-- Мировые CFrame костей в покое: без Transform, от корневой детали.
-	local root_cf = (root :: BasePart).CFrame
+	-- Мировые CFrame костей модели в покое: без Transform, от корневой детали.
+	local root_cf = root.CFrame
 	local rest_cf: { [Bone]: CFrame } = {}
-	local order: { Bone } = {}
-	for _, d in (root :: BasePart):GetDescendants() do
+	for _, d in root:GetDescendants() do
 		if d:IsA("Bone") then
 			d.Transform = CFrame.identity
 			local parent_cf = if d.Parent == root then root_cf else rest_cf[d.Parent :: Bone]
@@ -203,52 +200,53 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 	local function at(slot: string): Vector3
 		return rest_cf[found[slot]].Position
 	end
-
-	local role: { [Bone]: string } = {}
-	for _, pair in ROLES do
-		local b = found[pair[1]]
-		if b and role[b] == nil then
-			role[b] = pair[2]
-		end
+	local function sk(name: string): CFrame
+		return tpose[index[name]]
 	end
+
+	-- 1. Общий поворот G: T-поза скейтера -> поза покоя модели.
+	local g_rig = body_frame(at("r_leg") - at("l_leg"), at("neck") - at("hips"))
+	local g_sk = body_frame(sk("RIGHTUPLEG").Position - sk("LEFTUPLEG").Position, sk("NECK").Position - sk("HIPS").Position)
+	local G = g_rig * g_sk:Inverse()
+	local G_inv = G:Inverse()
+
+	-- 2-3. Поворот A каждой кости и постоянная поправка offset.
+	local A: { [string]: CFrame } = {}
+	local source: { [Bone]: number } = {}
+	local offset: { [Bone]: CFrame } = {}
+	for _, s in SLOTS do
+		local b = found[s.slot]
+		if b == nil or index[s.skater] == nil then
+			continue
+		end
+		local a = CFrame.identity
+		if s.child and found[s.child] and s.skater_child and index[s.skater_child] then
+			local rig_dir = unit(at(s.child) - at(s.slot), Vector3.yAxis)
+			local sk_dir = unit(G:VectorToWorldSpace(sk(s.skater_child).Position - sk(s.skater).Position), rig_dir)
+			a = swing(rig_dir, sk_dir)
+		elseif s.inherit and A[s.inherit] then
+			a = A[s.inherit]
+		end
+		A[s.slot] = a
+		source[b] = index[s.skater]
+		offset[b] = sk(s.skater).Rotation:Inverse() * G_inv * a * rest_cf[b].Rotation
+	end
+
 	-- Порядок обхода: все кости по пути к управляемым (предки раньше детей).
 	local needed: { [Bone]: boolean } = {}
-	for b in role do
+	for b in source do
 		local x: Instance? = b
 		while x and x:IsA("Bone") do
 			needed[x :: Bone] = true
 			x = x.Parent
 		end
 	end
-	for _, d in (root :: BasePart):GetDescendants() do
+	local order: { Bone } = {}
+	for _, d in root:GetDescendants() do
 		if d:IsA("Bone") and needed[d] then
 			table.insert(order, d)
 		end
 	end
-
-	-- Рамки частей тела в покое (в мире), в тех же соглашениях, что r15_pose.
-	local hip_right = unit(at("r_leg") - at("l_leg"), Vector3.xAxis)
-	local shoulder_right = unit(at("r_arm") - at("l_arm"), hip_right)
-	local chest_at = if found.chest then at("chest") else at("spine")
-	local rest_frame: { [string]: CFrame } = {}
-	rest_frame.LowerTorso = frame(unit(at("spine") - at("hips"), Vector3.yAxis), hip_right)
-	rest_frame.UpperTorso = frame(unit(at("neck") - at("spine"), unit(at("neck") - chest_at, Vector3.yAxis)), shoulder_right)
-	rest_frame.Head = frame(Vector3.yAxis, shoulder_right)
-	for _, side in { "r", "l" } do
-		local Side = if side == "r" then "Right" else "Left"
-		local upper = unit(at(side .. "_arm") - at(side .. "_elbow"), -Vector3.yAxis)
-		local lower = unit(at(side .. "_elbow") - at(side .. "_wrist"), upper)
-		rest_frame[Side .. "UpperArm"] = limb_rest(upper, shoulder_right)
-		rest_frame[Side .. "LowerArm"] = limb_rest(lower, shoulder_right)
-		rest_frame[Side .. "Hand"] = rest_frame[Side .. "LowerArm"]
-		local thigh = unit(at(side .. "_leg") - at(side .. "_knee"), Vector3.yAxis)
-		local shin = unit(at(side .. "_knee") - at(side .. "_ankle"), thigh)
-		rest_frame[Side .. "UpperLeg"] = limb_rest(thigh, hip_right)
-		rest_frame[Side .. "LowerLeg"] = limb_rest(shin, hip_right)
-		local toe = if found[side .. "_toe"] then at(side .. "_toe") else at(side .. "_ankle") - Vector3.zAxis
-		rest_frame[Side .. "Foot"] = foot_frame(at(side .. "_ankle"), toe, hip_right)
-	end
-	-- Пустая часть (если такой роли нет) — без поворота.
 	local rest_world: { [Bone]: CFrame } = {}
 	for b, cf in rest_cf do
 		rest_world[b] = cf.Rotation
@@ -256,18 +254,14 @@ function bone_pose.bind(template: Model, bone_names: { string }, parent: Instanc
 
 	local leg_mid = (at("r_leg") + at("l_leg")) / 2
 	local leg_length = (at("r_leg") - at("r_knee")).Magnitude + (at("r_knee") - at("r_ankle")).Magnitude
-	local index = {}
-	for i, name in bone_names do
-		index[string.upper(name)] = i
-	end
 	return {
 		model = model,
-		root = root :: BasePart,
+		root = root,
 		root_rotation = root_cf.Rotation,
 		order = order,
-		role = role,
+		source = source,
+		offset = offset,
 		rest_world = rest_world,
-		rest_frame = rest_frame,
 		hips = found.hips,
 		hips_local = root_cf:PointToObjectSpace(at("hips")),
 		hips_offset = at("hips") - leg_mid,
@@ -284,25 +278,20 @@ end
 
 -- Поставить позу. bones — мировые CFrame костей скейтера в стадах.
 function bone_pose.apply(rig: Rig, bones: { CFrame })
-	local target = r15_pose.orientations(rig, bones)
 	if rig.leg_scale == nil then
 		local hip, knee, ankle = bone_at(rig, bones, "RIGHTUPLEG"), bone_at(rig, bones, "RIGHTLEG"), bone_at(rig, bones, "RIGHTFOOT")
 		local skater = (hip - knee).Magnitude + (knee - ankle).Magnitude
 		rig.leg_scale = if skater > 1e-3 then rig.leg_length / skater else 1
 	end
-	-- Разница поворотов частей: куда повернуть кость из позы покоя.
-	local delta: { [string]: CFrame } = {}
-	for name, rest in rig.rest_frame do
-		local t = target[name]
-		if t then
-			delta[name] = t * rest:Inverse()
-		end
+	local function want(b: Bone): CFrame
+		return bones[rig.source[b]].Rotation * rig.offset[b]
 	end
-	-- Таз: голеностопы на месте, бёдра выше на длину ног модели (как в r15_pose).
+
+	-- Таз: голеностопы на месте, бёдра выше на длину ног модели.
 	local feet = (bone_at(rig, bones, "RIGHTFOOT") + bone_at(rig, bones, "LEFTFOOT")) / 2
 	local uplegs = (bone_at(rig, bones, "RIGHTUPLEG") + bone_at(rig, bones, "LEFTUPLEG")) / 2
 	local hips_at = feet + (uplegs - feet) * (rig.leg_scale :: number)
-	local pelvis = delta.LowerTorso or CFrame.identity
+	local pelvis = want(rig.hips) * rig.rest_world[rig.hips]:Inverse()
 	local hips_pos = hips_at + pelvis:VectorToWorldSpace(rig.hips_offset)
 
 	-- Корневая деталь: в покойном повороте, так чтобы кость Hips попала в hips_pos.
@@ -317,12 +306,10 @@ function bone_pose.apply(rig: Rig, bones: { CFrame })
 			continue
 		end
 		local base = parent_cf * b.CFrame -- кость с Transform = 1
-		local r = rig.role[b]
-		local d = if r then delta[r] else nil
-		if d then
-			local want = d * rig.rest_world[b]
-			b.Transform = base.Rotation:Inverse() * want
-			world[b] = CFrame.new(base.Position) * want
+		if rig.source[b] then
+			local w = want(b)
+			b.Transform = base.Rotation:Inverse() * w
+			world[b] = CFrame.new(base.Position) * w
 		else
 			b.Transform = CFrame.identity
 			world[b] = base
