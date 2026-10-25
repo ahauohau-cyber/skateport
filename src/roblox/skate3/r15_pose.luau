@@ -13,7 +13,9 @@ local r15_pose = {}
 
 export type Bones = { any } -- мировые матрицы 4x4 (столбцы), метры
 
-type Joint = { motor: Motor6D, part0: BasePart, part1: BasePart, c0: CFrame, c1: CFrame }
+-- motor: Motor6D (классический R15) или AnimationConstraint (новые аватары
+-- Roblox: сустав между двумя Attachment, у него тоже есть Transform).
+type Joint = { motor: any, part0: BasePart, part1: BasePart, c0: CFrame, c1: CFrame }
 
 export type Rig = {
 	character: Model,
@@ -22,6 +24,7 @@ export type Rig = {
 	index: { [string]: number }, -- имя кости -> индекс
 	leg_scale: number?,
 	studs_per_metre: number,
+	kinematic: { [Instance]: boolean }, -- прежние IsKinematic у AnimationConstraint
 }
 
 local PARTS = {
@@ -51,6 +54,12 @@ function r15_pose.bind(character: Model, bone_names: { string }, studs_per_metre
 	for _, d in character:GetDescendants() do
 		if d:IsA("Motor6D") and d.Part0 and d.Part1 then
 			joints[d.Part1.Name] = { motor = d, part0 = d.Part0, part1 = d.Part1, c0 = d.C0, c1 = d.C1 }
+		elseif d:IsA("AnimationConstraint") then
+			local a0, a1 = d.Attachment0, d.Attachment1
+			if a0 and a1 and a0.Parent and a1.Parent and a0.Parent:IsA("BasePart") and a1.Parent:IsA("BasePart") then
+				local part0, part1 = a0.Parent :: BasePart, a1.Parent :: BasePart
+				joints[part1.Name] = { motor = d, part0 = part0, part1 = part1, c0 = a0.CFrame, c1 = a1.CFrame }
+			end
 		end
 	end
 	for _, name in PARTS do
@@ -62,7 +71,17 @@ function r15_pose.bind(character: Model, bone_names: { string }, studs_per_metre
 	for i, name in bone_names do
 		index[string.upper(name)] = i
 	end
-	return { character = character, root = root, joints = joints, index = index, leg_scale = nil, studs_per_metre = studs_per_metre }
+	-- ROBLOX: у новых аватаров суставы — AnimationConstraint, их держит физика
+	-- с ограниченной силой, и под гравитацией тело «оседает». На время
+	-- катания делаем их жёсткими (IsKinematic), потом возвращаем как было.
+	local kinematic = {}
+	for _, j in joints do
+		if j.motor:IsA("AnimationConstraint") then
+			kinematic[j.motor] = j.motor.IsKinematic
+			j.motor.IsKinematic = true
+		end
+	end
+	return { character = character, root = root, joints = joints, index = index, leg_scale = nil, studs_per_metre = studs_per_metre, kinematic = kinematic }
 end
 
 local function pos(rig: Rig, bones: Bones, name: string): Vector3
@@ -150,32 +169,42 @@ local function orientations(rig: Rig, bones: Bones): ({ [string]: CFrame }, Vect
 	return out, hips
 end
 
--- Длина ноги аватара в стадах (по суставам в позе покоя) / длина ноги скейтера.
+-- Длина ноги аватара по суставам (бедро -> колено -> голеностоп) / та же у скейтера.
 local function leg_scale(rig: Rig, bones: Bones): number
 	local j = rig.joints
-	local avatar = (j.RightUpperLeg.part1.Size.Y + j.RightLowerLeg.part1.Size.Y)
+	-- Бедро: точка крепления в UpperLeg (c1 тазобедренного), колено — c0 коленного там же.
+	local thigh = (j.RightUpperLeg.c1.Position - j.RightLowerLeg.c0.Position).Magnitude
+	local shin = (j.RightLowerLeg.c1.Position - j.RightFoot.c0.Position).Magnitude
 	local hip, knee, ankle = pos(rig, bones, "RIGHTUPLEG"), pos(rig, bones, "RIGHTLEG"), pos(rig, bones, "RIGHTFOOT")
 	local skater = (hip - knee).Magnitude + (knee - ankle).Magnitude
 	if skater < 1e-3 then
 		return 1
 	end
-	return avatar / skater
+	return (thigh + shin) / skater
+end
+
+-- Середина тазобедренных суставов аватара в осях LowerTorso.
+local function hip_mid_local(rig: Rig): Vector3
+	local j = rig.joints
+	return (j.RightUpperLeg.c0.Position + j.LeftUpperLeg.c0.Position) / 2
 end
 
 -- Применить позу. Вызывать каждый кадр после того, как Animator отработал
 -- (RunService.PreSimulation), иначе анимации перезапишут Transform.
 function r15_pose.apply(rig: Rig, bones: Bones)
-	local rot, hips = orientations(rig, bones)
+	local rot = orientations(rig, bones)
 	if rig.leg_scale == nil then
 		rig.leg_scale = leg_scale(rig, bones)
 	end
-	-- Бёдра: ступни остаются на месте, высота бёдер над ними — по длине ног аватара.
+	-- Таз: голеностопы остаются на месте, середина тазобедренных суставов
+	-- поднята над ними в масштабе длины ног аватара.
 	local feet = (pos(rig, bones, "RIGHTFOOT") + pos(rig, bones, "LEFTFOOT")) / 2
-	local hips_at = feet + (hips - feet) * (rig.leg_scale :: number)
+	local uplegs = (pos(rig, bones, "RIGHTUPLEG") + pos(rig, bones, "LEFTUPLEG")) / 2
+	local hips_at = feet + (uplegs - feet) * (rig.leg_scale :: number)
 
 	-- Корень: LowerTorso = HRP * C0 * T * C1^-1 с T = 1  =>  HRP = LT * C1 * C0^-1.
 	local root = rig.joints.LowerTorso
-	local lower = CFrame.new(hips_at) * rot.LowerTorso
+	local lower = CFrame.new(hips_at) * rot.LowerTorso * CFrame.new(-hip_mid_local(rig))
 	root.motor.Transform = CFrame.identity
 	rig.root.CFrame = lower * root.c1 * root.c0:Inverse()
 	rig.root.AssemblyLinearVelocity = Vector3.zero
@@ -198,6 +227,9 @@ end
 function r15_pose.reset(rig: Rig)
 	for _, j in rig.joints do
 		j.motor.Transform = CFrame.identity
+	end
+	for motor, was in rig.kinematic do
+		(motor :: any).IsKinematic = was
 	end
 end
 

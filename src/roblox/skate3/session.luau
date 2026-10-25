@@ -37,6 +37,8 @@ export type Session = {
 	connections: { RBXScriptConnection },
 	saved: { [string]: any },
 	camera_cf: CFrame?,
+	camera_prev: Vector3?,
+	camera_forward: Vector3?,
 	status_text: TextLabel?,
 	stopped: boolean,
 }
@@ -89,24 +91,35 @@ local function make_status(player: Player): TextLabel
 	return label
 end
 
--- Простая камера сзади: смотрит на бёдра, держится позади по направлению езды.
+-- Камера сзади: смотрит на скейтера (корень персонажа = таз скейтера) и
+-- держится позади по направлению движения. Когда стоим — направление прежнее.
 local function update_camera(self: Session, dt: number)
 	local camera = workspace.CurrentCamera
-	if camera == nil then
+	if camera == nil or dt <= 0 then
 		return
 	end
-	local status = engine.status(self.engine)
-	local deck = engine.deck_transform(self.engine)
-	local p = deck.translation
-	local target = Vector3.new(p.x * S, p.y * S + 3.2, p.z * S)
-	local c3 = deck.basis.columns[3]
-	local along = Vector3.new(c3[1], 0, c3[3])
-	local v = status.velocity
-	local velocity = Vector3.new(v[1], 0, v[3])
-	local forward = if velocity.Magnitude > 0.5 then velocity.Unit elseif along.Magnitude > 1e-3 then along.Unit else Vector3.zAxis
-	local desired = target - forward * 13 + Vector3.new(0, 4.5, 0)
+	local root = self.character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root == nil then
+		return
+	end
+	local here = root.Position
+	local previous = self.camera_prev or here
+	self.camera_prev = here
+	local moved = (here - previous) / dt
+	moved = Vector3.new(moved.X, 0, moved.Z)
+	local forward = self.camera_forward or Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+	if moved.Magnitude > 2 then
+		forward = forward:Lerp(moved.Unit, 1 - math.exp(-dt * 4))
+	end
+	if forward.Magnitude < 1e-3 then
+		forward = Vector3.zAxis
+	end
+	forward = forward.Unit
+	self.camera_forward = forward
+	local target = here + Vector3.new(0, 1.5, 0)
+	local desired = target - forward * 12 + Vector3.new(0, 4, 0)
 	local current = self.camera_cf
-	local alpha = 1 - math.exp(-dt * 6)
+	local alpha = 1 - math.exp(-dt * 8)
 	local position = if current then current.Position:Lerp(desired, alpha) else desired
 	self.camera_cf = CFrame.lookAt(position, target)
 	camera.CameraType = Enum.CameraType.Scriptable
@@ -159,6 +172,8 @@ function session.start(player: Player): Session?
 		connections = {},
 		saved = { walk = humanoid.WalkSpeed, jump = humanoid.JumpPower, platform = humanoid.PlatformStand, collide = {} },
 		camera_cf = nil,
+		camera_prev = nil,
+		camera_forward = nil,
 		status_text = label,
 		stopped = false,
 	}
