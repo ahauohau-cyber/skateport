@@ -46,6 +46,7 @@ export type Macro = {
 	phase: Phase,
 	ticks: number, -- тиков в текущей фазе
 	settings: Settings,
+	completed: boolean, -- последний запуск дошёл до конца (RB → Y)
 }
 
 function speed_glitch.defaults(): Settings
@@ -53,13 +54,14 @@ function speed_glitch.defaults(): Settings
 end
 
 function speed_glitch.new(): Macro
-	return { phase = "idle", ticks = 0, settings = speed_glitch.defaults() }
+	return { phase = "idle", ticks = 0, settings = speed_glitch.defaults(), completed = false }
 end
 
 function speed_glitch.start(self: Macro)
 	if self.phase == "idle" then
 		self.phase = "dismount"
 		self.ticks = 0
+		self.completed = false
 	end
 end
 
@@ -147,6 +149,7 @@ function speed_glitch.step(self: Macro, state: number, holding: boolean): (numbe
 		if self.ticks <= s.y_hold then
 			return Y, 0
 		end
+		self.completed = true
 		go(self, "idle")
 		return 0, 0
 	end

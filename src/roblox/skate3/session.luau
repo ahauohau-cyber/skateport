@@ -13,7 +13,8 @@
 -- Ходьба тоже идёт через ядро: в Skate 3 сойти с доски — Y (клавиша R).
 --
 -- Горячие клавиши сверху раскладки keyboard_pad:
---   G — спид-глитч (speed_glitch), с места или прямо из катания («дабл глитч»);
+--   G — спид-глитч (speed_glitch), с места или прямо из катания («дабл глитч»).
+--       Глитч запускается только этой клавишей;
 --   + / - — множитель буста глитча (×1 … ×4, по умолчанию ×1.5);
 --   J — Christ Air: держишь в воздухе — ядро делает родной трюк (триггер + B).
 --       На земле клавиша ничего не делает.
@@ -478,7 +479,11 @@ function session.start(player: Player): Session?
 			if was_running and self.glitch.phase == "idle" then
 				self.glitch_watch = 150
 				self.glitch_best = 0
-				self.boost_wait = 180
+				-- Буст — только если макрос дошёл до конца (RB → Y), а не
+				-- прервался: иначе он сработал бы на обычном приземлении.
+				if self.glitch.completed then
+					self.boost_wait = 60
+				end
 			end
 			local ramp = self.ramp
 			if ramp then
@@ -593,10 +598,6 @@ function session.start(player: Player): Session?
 		if input.KeyCode == Enum.KeyCode.J then
 			self.christ_held = false
 		end
-	end))
-	-- Запуск глитча атрибутом (удобно для подбора настроек из консоли).
-	table.insert(self.connections, player:GetAttributeChangedSignal("SkateGlitchGo"):Connect(function()
-		start_glitch(self)
 	end))
 	table.insert(self.connections, humanoid.Died:Connect(function()
 		session.stop(self)

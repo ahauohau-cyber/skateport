@@ -55,7 +55,10 @@ engine.PERFORMANCE = {
 	["rider+k"] = { solver = { rider_passes = "auto" }, rider = {} },
 	["both+k"] = { solver = { rider_passes = "auto", vector_kernels = true }, rider = {} },
 }
-engine.DEFAULT_PERFORMANCE = "k"
+-- ROBLOX: по умолчанию "off" — в "k" тело райдера идёт по анимации без
+-- полного солвера, и часть анимаций выглядит поломанной (жалоба в Studio).
+-- Нативная компиляция ускоряет и "off" (10.8 → 7.4 мс/тик в Studio).
+engine.DEFAULT_PERFORMANCE = "off"
 
 function engine.set_performance(mode: string?): string
 	local name = if mode and engine.PERFORMANCE[mode] then mode else engine.DEFAULT_PERFORMANCE
