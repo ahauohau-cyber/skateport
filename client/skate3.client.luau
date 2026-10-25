@@ -11,6 +11,8 @@ local session = require(ReplicatedStorage:WaitForChild("SkatePort"):WaitForChild
 local player = Players.LocalPlayer
 local current: any = nil
 local busy = false
+-- Если запуск не удался, не повторяем, пока атрибут не выключат и не включат снова.
+local failed = false
 
 local function sync()
 	if busy then
@@ -18,10 +20,15 @@ local function sync()
 	end
 	busy = true
 	local want = player:GetAttribute("Skate3") == true
-	if want and current == nil then
-		current = session.start(player)
+	if not want then
+		failed = false
+	end
+	if want and current == nil and not failed then
+		local ok, result = pcall(session.start, player)
+		current = if ok then result else nil
 		if current == nil then
-			warn("skate3: не удалось начать сеанс")
+			failed = true
+			warn("skate3: не удалось начать сеанс", if ok then "" else result)
 		end
 	elseif not want and current ~= nil then
 		session.stop(current)
@@ -29,7 +36,7 @@ local function sync()
 	end
 	busy = false
 	-- Атрибут мог поменяться, пока шла загрузка.
-	if (player:GetAttribute("Skate3") == true) ~= (current ~= nil) then
+	if not failed and (player:GetAttribute("Skate3") == true) ~= (current ~= nil) then
 		task.defer(sync)
 	end
 end

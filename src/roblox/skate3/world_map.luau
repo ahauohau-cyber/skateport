@@ -16,6 +16,7 @@
 local CollectionService = game:GetService("CollectionService")
 
 local part_shapes = require(script.Parent.Parent.part_shapes)
+local world_scan = require(script.Parent.world_scan)
 
 local world_map = {}
 
@@ -96,39 +97,108 @@ export type BuildResult = {
 	skipped: { BasePart },
 }
 
--- Собрать SkateMap из всех деталей под root. spawn — точка в стадах, где
--- доска встаёт колёсами на землю; heading — поворот вокруг Y (радианы).
-function world_map.build(root: Instance, spawn: Vector3, heading: number, filter: ((BasePart) -> boolean)?): BuildResult
-	local accept = filter or world_map.default_filter
+export type Options = {
+	filter: ((BasePart) -> boolean)?,
+	radius: number?, -- стады от spawn: детали дальше не берём (по умолчанию 600)
+	terrain_radius: number?, -- стады: квадрат Terrain вокруг spawn (по умолчанию 220)
+	terrain_step: number?, -- стады: шаг сетки Terrain (по умолчанию 2)
+	yield: (() -> ())?,
+	log: ((string) -> ())?,
+}
+
+-- Треугольники одной детали любым доступным способом.
+local function part_triangles(part: BasePart): { any }
+	local exact = part_shapes.part_triangles(part)
+	if exact ~= nil then
+		return exact
+	end
+	if part:IsA("MeshPart") then
+		return world_scan.mesh_part(part)
+	end
+	return world_scan.part_heightfield(part)
+end
+
+-- Ядро сваривает вершины ближе 1 мм и отвергает вырожденные треугольники
+-- ("Invalid SKATE collision volume"), поэтому слишком мелкие отбрасываем сами.
+local MIN_EDGE = 0.003 -- м
+local function valid(p: { vector }): boolean
+	local a, b, c = p[1], p[2], p[3]
+	if vector.magnitude(b - a) < MIN_EDGE or vector.magnitude(c - b) < MIN_EDGE or vector.magnitude(a - c) < MIN_EDGE then
+		return false
+	end
+	local n = vector.cross(b - a, c - a)
+	local area = vector.magnitude(n)
+	-- Иглы (почти нулевая площадь при длинных рёбрах) тоже не нужны.
+	return area > 1e-6 and area == area
+end
+
+local function add(collision: { any }, triangles: { any })
+	for _, t in triangles do
+		local p = t.points
+		if not valid(p) then
+			continue
+		end
+		table.insert(collision, {
+			points = {
+				{ p[1].x, p[1].y, p[1].z },
+				{ p[2].x, p[2].y, p[2].z },
+				{ p[3].x, p[3].y, p[3].z },
+			},
+			surface = t.surface,
+			material = 1,
+			native_edges = nil,
+		})
+	end
+end
+
+-- Расстояние от точки до AABB детали (стады).
+local function distance_to(part: BasePart, point: Vector3): number
+	local half = part.Size.Magnitude / 2
+	return math.max(0, (part.Position - point).Magnitude - half)
+end
+
+-- Собрать SkateMap: детали в радиусе от spawn (стады), Terrain вокруг, рельсы.
+-- heading — поворот доски вокруг Y (радианы).
+function world_map.build(root: Instance, spawn: Vector3, heading: number, options: Options?): BuildResult
+	local opts: Options = options or {}
+	local accept = opts.filter or world_map.default_filter
+	local radius = opts.radius or 600
+	local yield = opts.yield
 	local collision = {}
 	local rails = {}
 	local skipped = {}
+	local count = 0
 	for _, item in root:GetDescendants() do
-		if item:IsA("BasePart") then
+		if item:IsA("BasePart") and item ~= workspace.Terrain and distance_to(item, spawn) <= radius then
 			if is_rail(item) then
 				table.insert(rails, { name = item:GetFullName(), closed = false, points = rail_points(item), native = nil })
 			end
 			if accept(item) then
-				local triangles = part_shapes.part_triangles(item)
-				if triangles == nil then
-					table.insert(skipped, item)
+				local ok, triangles = pcall(part_triangles, item)
+				if ok then
+					add(collision, triangles)
 				else
-					for _, t in triangles do
-						local p = t.points
-						table.insert(collision, {
-							points = {
-								{ p[1].x, p[1].y, p[1].z },
-								{ p[2].x, p[2].y, p[2].z },
-								{ p[3].x, p[3].y, p[3].z },
-							},
-							surface = t.surface,
-							material = 1,
-							native_edges = nil,
-						})
-					end
+					table.insert(skipped, item)
+				end
+				count += 1
+				if yield and count % 200 == 0 then
+					yield()
 				end
 			end
 		end
+	end
+	local parts_triangles = #collision
+	-- Terrain: только если в нём что-то есть.
+	local terrain = workspace.Terrain
+	local has_terrain = false
+	pcall(function()
+		has_terrain = terrain:CountCells() > 0
+	end)
+	if has_terrain then
+		add(collision, world_scan.terrain(spawn, opts.terrain_radius or 220, opts.terrain_step or 2, yield))
+	end
+	if opts.log then
+		opts.log(string.format("[skate3] карта: детали %d треуг., terrain %d треуг., рельсов %d", parts_triangles, #collision - parts_triangles, #rails))
 	end
 	local map = {
 		version = 1,

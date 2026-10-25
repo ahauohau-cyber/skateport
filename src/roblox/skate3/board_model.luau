@@ -12,6 +12,7 @@ export type Board = {
 	model: Model,
 	deck: BasePart,
 	offsets: { [BasePart]: CFrame },
+	deck_offset: CFrame?, -- смещение самой детали deck от центра деки физики
 }
 
 local function part(model: Model, name: string, size: Vector3, color: Color3, shape: Enum.PartType?): BasePart
@@ -32,7 +33,78 @@ local function part(model: Model, name: string, size: Vector3, color: Color3, sh
 	return p
 end
 
+-- Шаблон настоящей доски: модель "Board" (RootPart + меши SkateBoard /
+-- SkateTruck / SkateWheel и кость SKATEBOARD_ROOT). Ищем в ReplicatedStorage,
+-- затем в Workspace. Меши уже в масштабе ядра (1 м = 1/0.28 стада).
+local function find_template(): Model?
+	for _, place in { game:GetService("ReplicatedStorage"), workspace } do
+		local m = place:FindFirstChild("Board")
+		if m and m:IsA("Model") then
+			return m
+		end
+	end
+	return nil
+end
+
+-- Доска из шаблона: каждую меш-деталь ставим относительно кости
+-- SKATEBOARD_ROOT, которая совпадает с центром деки в физике ядра.
+local function from_template(template: Model, parent: Instance): Board?
+	local root_bone = template:FindFirstChild("SKATEBOARD_ROOT", true)
+	if root_bone == nil or not root_bone:IsA("Bone") then
+		return nil
+	end
+	-- Оси деки = оси модели (доска лежит вдоль Z); от кости берём только позицию.
+	local pivot = template:GetPivot()
+	local origin = CFrame.new(root_bone.WorldPosition) * pivot.Rotation
+	local model = Instance.new("Model")
+	model.Name = "Skate3Board"
+	model:SetAttribute("SkateIgnore", true)
+	local offsets: { [BasePart]: CFrame } = {}
+	local deck: BasePart? = nil
+	for _, d in template:GetDescendants() do
+		if d:IsA("BasePart") and d.Name ~= "RootPart" then
+			local copy = d:Clone()
+			for _, child in copy:GetChildren() do
+				if child:IsA("JointInstance") or child:IsA("Constraint") or child:IsA("Bone") then
+					child:Destroy()
+				end
+			end
+			copy.Anchored = true
+			copy.CanCollide = false
+			copy.CanQuery = false
+			copy.CanTouch = false
+			copy.Massless = true
+			copy.Parent = model
+			offsets[copy] = origin:ToObjectSpace(d.CFrame)
+			if d.Name == "SkateBoard" or deck == nil then
+				deck = copy
+			end
+		end
+	end
+	if deck == nil then
+		model:Destroy()
+		return nil
+	end
+	offsets[deck :: BasePart] = nil
+	local deck_offset = origin:ToObjectSpace((template:FindFirstChild((deck :: BasePart).Name, true) :: BasePart).CFrame)
+	model.PrimaryPart = deck
+	model.Parent = parent
+	return { model = model, deck = deck :: BasePart, offsets = offsets, deck_offset = deck_offset }
+end
+
 function board_model.new(parent: Instance): Board
+	local template = find_template()
+	if template then
+		local board = from_template(template, parent)
+		if board then
+			return board
+		end
+		warn("skate3: модель Board без кости SKATEBOARD_ROOT или мешей — ставлю простую доску")
+	end
+	return board_model.simple(parent)
+end
+
+function board_model.simple(parent: Instance): Board
 	local model = Instance.new("Model")
 	model.Name = "Skate3Board"
 	model:SetAttribute("SkateIgnore", true)
@@ -59,17 +131,9 @@ function board_model.new(parent: Instance): Board
 	return { model = model, deck = deck, offsets = offsets }
 end
 
--- transform: { translation = {x,y,z}, basis = { columns = {{..},{..},{..}} } } в метрах.
-function board_model.place(self: Board, transform: any)
-	local t = transform.translation
-	local c = transform.basis.columns
-	local cf = CFrame.fromMatrix(
-		Vector3.new(t.x * S, t.y * S, t.z * S),
-		Vector3.new(c[1][1], c[1][2], c[1][3]),
-		Vector3.new(c[2][1], c[2][2], c[2][3]),
-		Vector3.new(c[3][1], c[3][2], c[3][3])
-	)
-	self.deck.CFrame = cf
+-- cf — CFrame центра деки в стадах (engine.deck_cframe, можно интерполировать).
+function board_model.place(self: Board, cf: CFrame)
+	self.deck.CFrame = if self.deck_offset then cf * self.deck_offset else cf
 	for p, offset in self.offsets do
 		p.CFrame = cf * offset
 	end

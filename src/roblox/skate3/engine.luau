@@ -195,6 +195,57 @@ function engine.bone_world(self: Engine, out: { any }): { any }
 	return out
 end
 
+-- Мировые CFrame всех костей в стадах (для отрисовки и интерполяции).
+function engine.bone_cframes(self: Engine, out: { CFrame }): { CFrame }
+	local anim = self.modules.animation
+	local root = anim.native_matrix(self.skater.animated_skeleton.roots.animation_to_world)
+	local pose = self.skater.render_pose
+	local s = engine.STUDS_PER_METRE
+	for i = 1, #pose do
+		local m = anim.native_matrix(pose[i])
+		local w = table.create(4)
+		for c = 1, 4 do
+			local col = m[c]
+			w[c] = {
+				root[1][1] * col[1] + root[2][1] * col[2] + root[3][1] * col[3] + root[4][1] * col[4],
+				root[1][2] * col[1] + root[2][2] * col[2] + root[3][2] * col[3] + root[4][2] * col[4],
+				root[1][3] * col[1] + root[2][3] * col[2] + root[3][3] * col[3] + root[4][3] * col[4],
+			}
+		end
+		-- ROBLOX: столбцы 1..3 — оси кости, 4 — позиция; CFrame хочет строки.
+		out[i] = CFrame.new(
+			w[4][1] * s, w[4][2] * s, w[4][3] * s,
+			w[1][1], w[2][1], w[3][1],
+			w[1][2], w[2][2], w[3][2],
+			w[1][3], w[2][3], w[3][3]
+		):Orthonormalize()
+	end
+	return out
+end
+
+-- CFrame деки в стадах.
+function engine.deck_cframe(self: Engine): CFrame
+	local t = engine.deck_transform(self)
+	local p = t.translation
+	local c = t.basis.columns
+	local s = engine.STUDS_PER_METRE
+	return CFrame.fromMatrix(
+		Vector3.new(p.x * s, p.y * s, p.z * s),
+		Vector3.new(c[1][1], c[1][2], c[1][3]),
+		Vector3.new(c[2][1], c[2][2], c[2][3]),
+		Vector3.new(c[3][1], c[3][2], c[3][3])
+	):Orthonormalize()
+end
+
+-- Мировая высота (метры) одной кости по индексу bone_names — дёшево, без всей позы.
+function engine.bone_height(self: Engine, index: number): number
+	local anim = self.modules.animation
+	local root = anim.native_matrix(self.skater.animated_skeleton.roots.animation_to_world)
+	local m = anim.native_matrix(self.skater.render_pose[index])
+	local t = m[4]
+	return root[1][2] * t[1] + root[2][2] * t[2] + root[3][2] * t[3] + root[4][2] * t[4]
+end
+
 -- Мировая матрица деки (метры) из физики доски.
 function engine.deck_transform(self: Engine): any
 	local BoardRuntime = self.modules.board_runtime.BoardRuntime
