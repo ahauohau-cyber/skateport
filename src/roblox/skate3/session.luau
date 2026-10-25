@@ -75,6 +75,7 @@ export type Session = {
 	hips_index: number?,
 	christ_held: boolean,
 	vampire: boolean,
+	pose_override: r15_pose.Override?,
 }
 
 local function set_animations(character: Model, humanoid: Humanoid, on: boolean)
@@ -259,6 +260,7 @@ function session.start(player: Player): Session?
 		hips_index = nil,
 		christ_held = false,
 		vampire = false,
+		pose_override = nil,
 	}
 	for i, name in result.bone_names do
 		if string.upper(name) == "HIPS" then
@@ -281,7 +283,16 @@ function session.start(player: Player): Session?
 	self.current = snapshot(result, nil)
 	self.previous = snapshot(result, nil)
 
-	-- Тики ядра и отрисовка — перед кадром (PreRender), после аниматора.
+	-- ROBLOX: Animator пишет Transform суставов на шаге PreAnimation, то есть
+	-- после PreRender. Поэтому позу суставов ставим ещё раз в PreSimulation
+	-- (после аниматора), иначе он сбрасывает её в стойку покоя.
+	table.insert(self.connections, RunService.PreSimulation:Connect(function()
+		if not self.stopped and self.rig and #self.render_bones > 0 then
+			r15_pose.apply(self.rig, self.render_bones, self.pose_override)
+		end
+	end))
+
+	-- Тики ядра и отрисовка — перед кадром (PreRender).
 	table.insert(self.connections, RunService.PreRender:Connect(function(dt)
 		if self.stopped then
 			return
@@ -340,6 +351,7 @@ function session.start(player: Player): Session?
 				override = "vampire"
 			end
 			r15_pose.apply(self.rig, bones, override)
+			self.pose_override = override
 		end
 		update_camera(self, dt)
 
