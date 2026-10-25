@@ -139,4 +139,18 @@ function keyboard_pad.poll(self: KeyboardPad): { any }
 	}
 end
 
+-- Состояние в формате ядра sim (skate_game/input/platform): плоский XInput.
+function keyboard_pad.gamepad(self: KeyboardPad): any
+	local s = keyboard_pad.state(self)
+	return {
+		buttons = s.buttons,
+		left_trigger = s.triggers[1],
+		right_trigger = s.triggers[2],
+		left_x = s.left[1],
+		left_y = s.left[2],
+		right_x = s.right[1],
+		right_y = s.right[2],
+	}
+end
+
 return keyboard_pad

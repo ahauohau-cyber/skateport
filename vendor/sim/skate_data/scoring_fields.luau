@@ -1,0 +1,75 @@
+-- Порт skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
+-- ROBLOX: взято из примерочного плейса (декомпилированный байткод: имена локальных
+-- переменных утеряны, f32-округления нет). Сверено с нашим бит-в-бит портом только частично.
+
+local sim = game:GetService("ReplicatedStorage"):WaitForChild("Skate3"):WaitForChild("sim")
+
+require(sim.rt)
+require(sim.import)
+
+return {
+    FIELDS = {
+        { 0, "Hash_8D544250D732B9A8", 80 },
+        { 80, "Hash_130B361B9E4D9369", 80 },
+        { 160, "Hash_156F53F56E861668", 80 },
+        { 240, "Hash_6DA2DFA9C8E3D863", 80 },
+        { 320, "Hash_9C9EFF9DB25BF70A", 80 },
+        { 400, "Hash_004A238881254FB5", 80 },
+        { 480, "Hash_198F48320EBB7C3A", 80 },
+        { 560, "Hash_F94C77A0FB410FE3", 80 },
+        { 640, "Hash_D7FBBD6E5E1EDF37", 80 },
+        { 720, "Hash_E78EDEC321055E09", 80 },
+        { 800, "Hash_8C24CF7B8227B348", 80 },
+        { 880, "Hash_5A756D4B3A5036DD", 80 },
+        { 960, "Hash_B552FB2712A897D6", 80 },
+        { 1040, "Hash_205C814AA3ACA8D4", 80 },
+        { 1120, "Hash_94F7B93068FE6FB1", 80 },
+        { 1200, "Hash_7E17CC5298BBA36E", 80 },
+        { 1280, "Hash_2D52116C69E3E1BE", 80 },
+        { 1360, "Hash_1F647002596E4157", 80 },
+        { 1440, "Hash_91529F3BD9F4DD25", 80 },
+        { 1520, "Hash_66216D696EEAD314", 4 },
+        { 1524, "Hash_3A444577C4D4661E", 4 },
+        { 1528, "Hash_B26A66F7634E760E", 4 },
+        { 1532, "Hash_BFDA1A507E2E55A1", 4 },
+        { 1536, "Hash_1CA631042D292121", 4 },
+        { 1540, "Hash_04A1775CB52A8E4D", 4 },
+        { 1544, "Hash_AD14550EFF3920DE", 4 },
+        { 1548, "Hash_4BEA9C285A3CDA06", 4 },
+        { 1552, "Hash_F813B960D0450300", 4 },
+        { 1556, "Hash_391821526C05A7F1", 4 },
+        { 1560, "Hash_B3C69AAF221F34F9", 4 },
+        { 1564, "Hash_E2AFE1B06292209D", 4 },
+        { 1568, "Hash_62B9C3DAA846E240", 4 },
+        { 1572, "Hash_B0D7A3876D2D274E", 4 },
+        { 1576, "Hash_77DD0728B4736957", 4 },
+        { 1580, "Hash_05BBAF2E866E083E", 4 },
+        { 1584, "Hash_5A2D1476F08690EC", 4 },
+        { 1588, "Hash_001BF89D79FA1CCB", 4 },
+        { 1592, "Hash_40E8618821693CD3", 4 },
+        { 1596, "Hash_25B11E405C140E61", 4 },
+        { 1600, "Hash_694410FC8D57E794", 4 },
+        { 1604, "Hash_2BE55EDC393F3D9B", 4 },
+        { 1608, "Hash_F1F451420D10D2C5", 4 },
+        { 1612, "Hash_3BD67FAE1E671F26", 4 },
+        { 1616, "Hash_F577378023AADAA2", 4 },
+        { 1620, "Hash_16CB3F5D3D560676", 4 },
+        { 1624, "Hash_67EBCA6DBB3EE9F1", 4 },
+        { 1628, "Hash_BA0B9725B1F7ABA7", 4 },
+        { 1632, "Hash_C5BEC05471041171", 4 },
+        { 1636, "Hash_BC91E9C84E099F2C", 4 },
+        { 1640, "Hash_C33E4AA507A2CB4C", 4 },
+        { 1644, "Hash_AB8EACF72B291746", 4 },
+        { 1648, "Hash_E5897F067B3C4F77", 4 },
+        { 1652, "Hash_2B55A2C725912CBF", 4 },
+        { 1656, "Hash_092D5E5FDE988D1B", 4 },
+        { 1660, "Hash_44746535286E1613", 4 },
+        { 1664, "Hash_0BA6F149F1462EB0", 4 },
+        { 1668, "Hash_EE42BA52A1313FDB", 4 },
+        { 1672, "Hash_945369EBD1E9A062", 4 },
+        { 1676, "Hash_123E054E8895CAFE", 4 },
+        { 1680, "Hash_63E61D37475E6AB9", 4 },
+        { 1684, "Hash_AC54DE5C98B5DFAD", 4 },
+        { 1688, "Hash_C4BDC0CD02C83A58", 4 }
+    }
+}

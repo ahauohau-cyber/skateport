@@ -18,3 +18,5 @@ tests/golden/skel.luau
 tests/golden/skel2.luau
 tests/golden/data2.luau
 tests/golden/wst.luau
+build/
+vendor/sim_data/

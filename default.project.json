@@ -5,12 +5,26 @@
     "ReplicatedStorage": {
       "SkatePort": {
         "$path": "src"
+      },
+      "Skate3": {
+        "$className": "Folder",
+        "sim": {
+          "$path": "build/sim.rbxm"
+        },
+        "sim_data": {
+          "$path": "build/sim_data.rbxm"
+        }
+      }
+    },
+    "ServerScriptService": {
+      "Skate3Admin": {
+        "$path": "server/skate3_admin.server.luau"
       }
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {
-        "SkatePortClient": {
-          "$path": "client/board_demo.client.luau"
+        "Skate3Client": {
+          "$path": "client/skate3.client.luau"
         }
       }
     }
