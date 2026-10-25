@@ -42,6 +42,30 @@ export type Engine = {
 	bone_names: { string },
 }
 
+-- ROBLOX: режимы производительности ядра (как Performance mode / host.Lite
+-- в примерочном плейсе). Физику доски не меняют, облегчают тело райдера:
+--   "off"     — полный солвер, как в Rust;
+--   "k"       — кинематический райдер (тело по анимации, без полного солвера);
+--   "rider+k" — плюс меньше проходов солвера по скелету;
+--   "both+k"  — плюс векторные ядра солвера (дефолт примерочного плейса).
+-- В эмуляторе: off 15.7 мс/тик, k 9.5, both+k 9.8 (tools/emu/perf_modes.luau).
+engine.PERFORMANCE = {
+	off = { solver = nil, rider = nil },
+	k = { solver = nil, rider = {} },
+	["rider+k"] = { solver = { rider_passes = "auto" }, rider = {} },
+	["both+k"] = { solver = { rider_passes = "auto", vector_kernels = true }, rider = {} },
+}
+engine.DEFAULT_PERFORMANCE = "k"
+
+function engine.set_performance(mode: string?): string
+	local name = if mode and engine.PERFORMANCE[mode] then mode else engine.DEFAULT_PERFORMANCE
+	local m = engine.PERFORMANCE[name]
+	local import = engine.import()
+	import("skate_core/physics/solver").set_mode(m.solver)
+	import("skate_game/physics/solve").set_rider(m.rider)
+	return name
+end
+
 -- Загрузить всё ядро. map — таблица SkateMap (см. world_map.build).
 -- log(text) — необязательный вывод этапов; yield() — уступить кадр между этапами.
 function engine.boot(map: any, log: ((string) -> ())?, yield: (() -> ())?): Engine
@@ -244,6 +268,52 @@ function engine.bone_height(self: Engine, index: number): number
 	local m = anim.native_matrix(self.skater.render_pose[index])
 	local t = m[4]
 	return root[1][2] * t[1] + root[2][2] * t[2] + root[3][2] * t[3] + root[4][2] * t[4]
+end
+
+-- ROBLOX: умножить горизонтальную скорость доски и тела райдера (буст после
+-- спид-глитча, клавиши + и -). Вертикальную не трогаем, чтобы не подбросить.
+function engine.scale_speed(self: Engine, factor: number)
+	local function scale(rates: any)
+		local v = rates.linear_velocity
+		v.x *= factor
+		v.z *= factor
+	end
+	local board = self.physics.board
+	for _, body in self.modules.board_runtime.BoardRuntime.bodies(board) do
+		scale(body.rates)
+	end
+	if board.hook and board.hook.body then
+		scale(board.hook.body.rates)
+	end
+	local skeleton = self.skater.skeleton
+	if skeleton and skeleton.bodies then
+		for _, body in skeleton.bodies do
+			scale(body.rates)
+		end
+	end
+end
+
+-- ROBLOX: поставить горизонтальную скорость (м/с) доске и телу райдера —
+-- когда после глитча доска почти стоит и умножать нечего.
+function engine.set_speed(self: Engine, vx: number, vz: number)
+	local function set(rates: any)
+		local v = rates.linear_velocity
+		v.x = vx
+		v.z = vz
+	end
+	local board = self.physics.board
+	for _, body in self.modules.board_runtime.BoardRuntime.bodies(board) do
+		set(body.rates)
+	end
+	if board.hook and board.hook.body then
+		set(board.hook.body.rates)
+	end
+	local skeleton = self.skater.skeleton
+	if skeleton and skeleton.bodies then
+		for _, body in skeleton.bodies do
+			set(body.rates)
+		end
+	end
 end
 
 -- Мировая матрица деки (метры) из физики доски.

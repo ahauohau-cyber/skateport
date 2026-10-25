@@ -17,6 +17,9 @@ local AssetService = game:GetService("AssetService")
 
 local world_scan = {}
 
+-- Секунд работы за кадр при сборке карты (дальше — уступить кадр).
+world_scan.FRAME_BUDGET = 0.004
+
 local M = 0.28
 
 export type Triangle = { points: { vector }, surface: number }
@@ -114,7 +117,8 @@ local function scan(include: { Instance }, x0: number, z0: number, nx: number, n
 	params.IgnoreWater = true
 	local heights = table.create(nx)
 	local direction = Vector3.new(0, -depth, 0)
-	local count = 0
+	-- ROBLOX: лучи пачками по времени (~4 мс за кадр), чтобы не было фриза.
+	local started = os.clock()
 	for i = 1, nx do
 		local row = table.create(nz, false)
 		local x = x0 + (i - 1) * step
@@ -123,12 +127,11 @@ local function scan(include: { Instance }, x0: number, z0: number, nx: number, n
 			if hit then
 				row[j] = hit.Position.Y
 			end
-			count += 1
 		end
 		heights[i] = row
-		if yield and count > 20000 then
-			count = 0
+		if yield and os.clock() - started > world_scan.FRAME_BUDGET then
 			yield()
+			started = os.clock()
 		end
 	end
 	return heights

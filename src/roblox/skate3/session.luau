@@ -13,7 +13,8 @@
 -- Ходьба тоже идёт через ядро: в Skate 3 сойти с доски — Y (клавиша R).
 --
 -- Горячие клавиши сверху раскладки keyboard_pad:
---   G — спид-глитч (speed_glitch);
+--   G — спид-глитч (speed_glitch), с места или прямо из катания («дабл глитч»);
+--   + / - — множитель буста глитча (×1 … ×4, по умолчанию ×1.5);
 --   J — Christ Air: держишь в воздухе — ядро делает родной трюк (триггер + B).
 --       На земле клавиша ничего не делает.
 
@@ -77,6 +78,10 @@ export type Session = {
 	pose_override: r15_pose.Override?,
 	custom: bone_pose.Rig?, -- своя модель на костях вместо аватара (тест)
 	glitch_watch: number, -- тиков осталось мерить скорость после глитча
+	boost: number, -- множитель буста спид-глитча (клавиши + и -)
+	glitch_before: number, -- м/с: скорость доски, когда глитч начался из катания
+	boost_wait: number, -- тиков ждать приземления, чтобы применить буст
+	ramp: { from: number, to: number, tick: number }?, -- плавный разгон после глитча
 	glitch_best: number,
 }
 
@@ -202,6 +207,37 @@ local GLITCH_ATTRIBUTES = {
 	y_hold = "SkateGlitchYHold",
 }
 
+-- ROBLOX: буст спид-глитча. Ядро даёт после глитча ~13-14 м/с всегда, и
+-- повторный глитч из катания скорость не складывает. Поэтому после приземления
+-- ставим скорость max(до глитча, после) × множитель — так «дабл глитч»
+-- разгоняет дальше. Множитель меняется клавишами + и - (×1 — как в ядре).
+local BOOST_STEPS = { 1, 1.25, 1.5, 2, 2.5, 3, 4 }
+local BOOST_CAP = 70 -- м/с: выше доска начинает пролетать сквозь стены
+local GLITCH_BASE = 14 -- м/с: столько ядро даёт после удачного глитча (Studio)
+local RAMP_TICKS = 20
+local SAFE_DISMOUNT = 12 -- м/с: быстрее сход с доски = падение
+
+local function riding(state: number): boolean
+	return state == 100 or state == 103
+end
+
+local function horizontal_speed(e: any): number
+	local v = engine.status(e).velocity
+	return math.sqrt(v[1] * v[1] + v[3] * v[3])
+end
+
+local function step_boost(self: any, dir: number)
+	local index = 1
+	for i, v in BOOST_STEPS do
+		if math.abs(v - self.boost) < 1e-3 then
+			index = i
+		end
+	end
+	index = math.clamp(index + dir, 1, #BOOST_STEPS)
+	self.boost = BOOST_STEPS[index]
+	self.player:SetAttribute("SkateBoost", self.boost)
+end
+
 local function start_glitch(self: any)
 	local settings = speed_glitch.defaults()
 	for key, attribute in GLITCH_ATTRIBUTES do
@@ -211,7 +247,71 @@ local function start_glitch(self: any)
 		end
 	end
 	self.glitch.settings = settings
+	if self.glitch.phase == "idle" then
+		-- Глитч из катания: запомнить скорость, чтобы буст складывался.
+		local e = self.engine
+		local state = e.skater.player_input.physical.state.state_16
+		self.glitch_before = if riding(state) then horizontal_speed(e) else 0
+		self.ramp = nil
+		if self.glitch_before > SAFE_DISMOUNT then
+			-- Сойти с доски на большой скорости — падение (как в Skate 3).
+			-- Притормаживаем до безопасной; скорость вернётся после глитча.
+			local v = engine.status(e).velocity
+			local k = SAFE_DISMOUNT / self.glitch_before
+			engine.set_speed(e, v[1] * k, v[3] * k)
+		end
+	end
 	speed_glitch.start(self.glitch)
+end
+
+-- ROBLOX: карта из Workspace собирается долго (лучи по Terrain, меши), поэтому
+-- держим последнюю и берём её снова, пока игрок в пределах CACHE_RADIUS от
+-- места сборки и в Workspace не добавляли/не убирали детали.
+local CACHE_RADIUS = 200 -- стады
+local map_cache: { centre: Vector3, map: any }? = nil
+local cache_watch: { RBXScriptConnection }? = nil
+
+local function cached_map(feet: Vector3, heading: number, log: (string) -> ()): any
+	if cache_watch == nil then
+		local function invalidate(item: Instance)
+			if item:IsA("BasePart") and item:GetAttribute("SkateIgnore") ~= true and item:FindFirstAncestorWhichIsA("Model") == nil then
+				map_cache = nil
+			elseif item:IsA("BasePart") then
+				-- Детали внутри моделей: персонажи и наши модели не считаем.
+				local model = item:FindFirstAncestorOfClass("Model")
+				if model and model:GetAttribute("SkateIgnore") ~= true and model:FindFirstChildOfClass("Humanoid") == nil and model:FindFirstChildOfClass("AnimationController") == nil then
+					map_cache = nil
+				end
+			end
+		end
+		cache_watch = {
+			workspace.DescendantAdded:Connect(invalidate),
+			workspace.DescendantRemoving:Connect(invalidate),
+		}
+	end
+	local cache = map_cache
+	local map
+	if cache and (cache.centre - feet).Magnitude <= CACHE_RADIUS then
+		log("[skate3] карта из кэша")
+		map = cache.map
+	else
+		local t = os.clock()
+		local built = world_map.build(workspace, feet, heading, {
+			yield = function()
+				task.wait()
+			end,
+			log = log,
+		})
+		log(string.format("[skate3] карта собрана за %.2f с", os.clock() - t))
+		map = built.map
+		map_cache = { centre = feet, map = map }
+		task.wait()
+	end
+	-- Своя точка появления и направление; геометрия общая.
+	local copy = table.clone(map)
+	copy.spawn = { feet.X / engine.STUDS_PER_METRE, feet.Y / engine.STUDS_PER_METRE, feet.Z / engine.STUDS_PER_METRE }
+	copy.heading = heading
+	return copy
 end
 
 local function airborne(state: number): boolean
@@ -239,15 +339,10 @@ function session.start(player: Player): Session?
 	local look = root.CFrame.LookVector
 	-- В ядре доска едет по +Z; heading — поворот вокруг Y.
 	local heading = math.atan2(look.X, look.Z)
-	local built = world_map.build(workspace, feet, heading, {
-		yield = function()
-			task.wait()
-		end,
-		log = log,
-	})
-	task.wait()
+	local map = cached_map(feet, heading, log)
 
-	local ok, result = pcall(engine.boot, built.map, log, function()
+	engine.set_performance(player:GetAttribute("SkatePerf") :: string?)
+	local ok, result = pcall(engine.boot, map, log, function()
 		task.wait()
 	end)
 	if not ok then
@@ -290,6 +385,10 @@ function session.start(player: Player): Session?
 		custom = nil,
 		glitch_watch = 0,
 		glitch_best = 0,
+		boost = if type(player:GetAttribute("SkateBoost")) == "number" then player:GetAttribute("SkateBoost") :: number else 1.5,
+		glitch_before = 0,
+		boost_wait = 0,
+		ramp = nil,
 	}
 	for i, name in result.bone_names do
 		if string.upper(name) == "HIPS" then
@@ -379,6 +478,43 @@ function session.start(player: Player): Session?
 			if was_running and self.glitch.phase == "idle" then
 				self.glitch_watch = 150
 				self.glitch_best = 0
+				self.boost_wait = 180
+			end
+			local ramp = self.ramp
+			if ramp then
+				-- Плавный разгон за RAMP_TICKS тиков: резкий скачок скорости
+				-- иногда сбрасывает райдера с доски.
+				ramp.tick += 1
+				local speed = ramp.from + (ramp.to - ramp.from) * math.min(ramp.tick / RAMP_TICKS, 1)
+				local v = engine.status(e).velocity
+				local dir = Vector3.new(v[1], 0, v[3])
+				if dir.Magnitude < 3 then
+					-- Почти стоим: туда, куда смотрит доска (ядро катит её по +Z деки).
+					dir = engine.deck_cframe(e).ZVector * Vector3.new(1, 0, 1)
+				end
+				if dir.Magnitude > 1e-3 then
+					dir = dir.Unit * speed
+					engine.set_speed(e, dir.X, dir.Z)
+				end
+				if ramp.tick >= RAMP_TICKS or not riding(e.skater.player_input.physical.state.state_16) then
+					self.ramp = nil
+				end
+			end
+			if self.boost_wait > 0 then
+				self.boost_wait -= 1
+				local now = e.skater.player_input.physical.state.state_16
+				if riding(now) then
+					-- Приземлились на доску: складываем скорость с множителем.
+					self.boost_wait = 0
+					local v = horizontal_speed(e)
+					-- Ядро после глитча даёт ~14 м/с; если доска приземлилась почти
+					-- без скорости, считаем базой это значение.
+					local base = math.max(v, self.glitch_before, if v < 3 then GLITCH_BASE else 0)
+					local target = math.min(base * self.boost, BOOST_CAP)
+					if target > v then
+						self.ramp = { from = v, to = target, tick = 0 }
+					end
+				end
 			end
 			if self.glitch_watch > 0 then
 				self.glitch_watch -= 1
@@ -428,9 +564,10 @@ function session.start(player: Player): Session?
 			table.insert(extras, "Christ Air")
 		end
 		label.Text = string.format(
-			"skate3: состояние %d  скорость %.1f м/с  тиков %d  %.1f мс%s",
+			"skate3: состояние %d  скорость %.1f м/с  буст ×%.2g (+/-)  тиков %d  %.1f мс%s",
 			st.state,
 			st.speed,
+			self.boost,
 			ticks,
 			cost * 1000,
 			if #extras > 0 then "  [" .. table.concat(extras, ", ") .. "]" else ""
@@ -441,7 +578,12 @@ function session.start(player: Player): Session?
 		if processed then
 			return
 		end
-		if input.KeyCode == Enum.KeyCode.G then
+		local key = input.KeyCode
+		if key == Enum.KeyCode.Equals or key == Enum.KeyCode.KeypadPlus then
+			step_boost(self, 1)
+		elseif key == Enum.KeyCode.Minus or key == Enum.KeyCode.KeypadMinus then
+			step_boost(self, -1)
+		elseif input.KeyCode == Enum.KeyCode.G then
 			start_glitch(self)
 		elseif input.KeyCode == Enum.KeyCode.J then
 			self.christ_held = true

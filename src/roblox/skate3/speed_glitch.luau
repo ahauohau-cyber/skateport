@@ -15,6 +15,12 @@
 -- Окно очень узкое (проверено в Studio): Y на кадр раньше или на 4 позже —
 -- буста нет. Поэтому макрос жмёт X → RB → Y с точными задержками в тиках
 -- ядра (1/60 с), а не по времени кадра.
+--
+-- Из катания («дабл глитч»): после схода на ходу доска катится сама (в руках
+-- её нет), а прыжок ядро принимает только через ~1.3 с, когда закончится
+-- анимация схода. Макрос жмёт X короткими нажатиями, пока персонаж не
+-- оторвётся от земли, и дальше — тот же RB → Y. Складывание скорости
+-- (множитель буста) делает session.
 
 local speed_glitch = {}
 
@@ -24,7 +30,7 @@ local RT = 255
 -- Физические состояния ядра (player/state.rs).
 local BIPED_GROUND, BIPED_AIR, OFFBOARD_PUSHING = 500, 501, 502
 
-export type Phase = "idle" | "dismount" | "wait_ground" | "drop" | "settle" | "jump" | "mount"
+export type Phase = "idle" | "dismount" | "wait_ground" | "drop" | "settle" | "try_jump" | "jump" | "mount"
 
 export type Settings = {
 	drop_hold: number, -- тиков держать RT (бросить доску)
@@ -78,7 +84,7 @@ function speed_glitch.step(self: Macro, state: number, holding: boolean): (numbe
 	local phase = self.phase
 	if phase == "dismount" then
 		if offboard(state) then
-			go(self, if holding then "drop" else "settle")
+			go(self, if holding then "drop" else "try_jump")
 			return 0, 0
 		end
 		-- Y — сойти с доски; держим несколько тиков, потом ждём земли.
@@ -89,7 +95,7 @@ function speed_glitch.step(self: Macro, state: number, holding: boolean): (numbe
 		return 0, 0
 	elseif phase == "wait_ground" then
 		if offboard(state) and self.ticks >= 30 then
-			go(self, if holding then "drop" else "settle")
+			go(self, if holding then "drop" else "try_jump")
 		elseif self.ticks > 150 then
 			go(self, "idle")
 		end
@@ -105,6 +111,19 @@ function speed_glitch.step(self: Macro, state: number, holding: boolean): (numbe
 			go(self, "jump")
 		end
 		return 0, 0
+	elseif phase == "try_jump" then
+		-- Доска не в руках (сошли на ходу): X короткими нажатиями, пока не прыгнем.
+		if state == BIPED_AIR then
+			-- Оторвались: как будто X нажали пару тиков назад.
+			go(self, "jump")
+			self.ticks = s.x_hold
+			return 0, 0
+		end
+		if self.ticks > 240 then
+			go(self, "idle")
+			return 0, 0
+		end
+		return if self.ticks % 8 < 3 then X else 0, 0
 	elseif phase == "jump" then
 		-- Тики считаются от первого нажатия X: X, потом RB на rb_at, Y через y_after_rb.
 		local t = self.ticks

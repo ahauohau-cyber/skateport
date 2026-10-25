@@ -216,6 +216,9 @@ local function require_instance(target)
 	end
 	local chunk = luau.load(source, { debugName = target:GetFullName(), environment = env, injectGlobals = true, codegenEnabled = true })
 	local result = chunk()
+	if emu.on_module then
+		result = emu.on_module(target, result)
+	end
 	loading[target] = nil
 	cache[target] = { result }
 	return result
