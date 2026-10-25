@@ -14,9 +14,8 @@ local r15_pose = {}
 export type Bones = { CFrame } -- мировые CFrame костей в стадах (engine.bone_cframes)
 
 -- Поверх позы скейтера можно наложить позу рук/корпуса:
---   "christ"  — руки в стороны (поза Христа);
---   "vampire" — прямой корпус, руки вытянуты вперёд (вампир/Носферату).
-export type Override = "christ" | "vampire"
+--   "christ"  — руки в стороны (поза Христа).
+export type Override = "christ"
 
 -- motor: Motor6D (классический R15) или AnimationConstraint (новые аватары
 -- Roblox: сустав между двумя Attachment, у него тоже есть Transform).
@@ -198,26 +197,7 @@ local function apply_override(rot: { [string]: CFrame }, override: Override)
 	local torso = rot.UpperTorso
 	local right = torso.RightVector
 	local back = torso.ZVector
-	if override == "vampire" then
-		-- Корпус и голова вертикально, лицо туда же, куда смотрел корпус.
-		local flat_back = Vector3.new(back.X, 0, back.Z)
-		if flat_back.Magnitude > 1e-3 then
-			flat_back = flat_back.Unit
-			local flat_right = Vector3.yAxis:Cross(flat_back)
-			local upright = CFrame.fromMatrix(Vector3.zero, flat_right, Vector3.yAxis, flat_back)
-			rot.UpperTorso = upright
-			rot.LowerTorso = upright
-			rot.Head = upright
-			right, back = flat_right, flat_back
-		end
-		-- Руки вперёд: ось Y руки смотрит от кисти к плечу, то есть назад.
-		for _, side in { "Right", "Left" } do
-			local arm = CFrame.fromMatrix(Vector3.zero, right, back, right:Cross(back))
-			rot[side .. "UpperArm"] = arm
-			rot[side .. "LowerArm"] = arm
-			rot[side .. "Hand"] = arm
-		end
-	elseif override == "christ" then
+	if override == "christ" then
 		-- Руки в стороны: у правой руки ось Y смотрит внутрь (к плечу) = -right.
 		local up = torso.UpVector
 		local function arm(y: Vector3): CFrame

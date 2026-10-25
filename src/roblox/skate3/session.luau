@@ -14,9 +14,8 @@
 --
 -- Горячие клавиши сверху раскладки keyboard_pad:
 --   G — спид-глитч (speed_glitch);
---   J — Christ Air: в воздухе это родной трюк ядра (триггер + B), на земле —
---       поза Христа (руки в стороны), пока держишь;
---   V — вкл/выкл «вампирскую походку»: прямой корпус, руки вперёд.
+--   J — Christ Air: держишь в воздухе — ядро делает родной трюк (триггер + B).
+--       На земле клавиша ничего не делает.
 
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -74,8 +73,9 @@ export type Session = {
 	glitch: any,
 	hips_index: number?,
 	christ_held: boolean,
-	vampire: boolean,
 	pose_override: r15_pose.Override?,
+	glitch_watch: number, -- тиков осталось мерить скорость после глитча
+	glitch_best: number,
 }
 
 local function set_animations(character: Model, humanoid: Humanoid, on: boolean)
@@ -187,6 +187,30 @@ local function update_camera(self: Session, dt: number)
 	camera.CFrame = CFrame.lookAt(position, focus)
 end
 
+-- Настройки глитча можно переопределить атрибутами игрока:
+-- SkateGlitchSettle, SkateGlitchXHold, SkateGlitchRbVy, SkateGlitchRbHold,
+-- SkateGlitchGap, SkateGlitchYHold (числа, тики по 1/60 с; RbVy — м/тик).
+local GLITCH_ATTRIBUTES = {
+	settle = "SkateGlitchSettle",
+	x_hold = "SkateGlitchXHold",
+	rb_vy = "SkateGlitchRbVy",
+	rb_hold = "SkateGlitchRbHold",
+	gap = "SkateGlitchGap",
+	y_hold = "SkateGlitchYHold",
+}
+
+local function start_glitch(self: any)
+	local settings = speed_glitch.defaults()
+	for key, attribute in GLITCH_ATTRIBUTES do
+		local value = self.player:GetAttribute(attribute)
+		if type(value) == "number" then
+			(settings :: any)[key] = value
+		end
+	end
+	self.glitch.settings = settings
+	speed_glitch.start(self.glitch)
+end
+
 local function airborne(state: number): boolean
 	return state >= 200 and state < 300
 end
@@ -259,8 +283,9 @@ function session.start(player: Player): Session?
 		glitch = speed_glitch.new(),
 		hips_index = nil,
 		christ_held = false,
-		vampire = false,
 		pose_override = nil,
+		glitch_watch = 0,
+		glitch_best = 0,
 	}
 	for i, name in result.bone_names do
 		if string.upper(name) == "HIPS" then
@@ -323,7 +348,23 @@ function session.start(player: Player): Session?
 				pad.buttons = bit32.bor(pad.buttons, extra)
 				pad.left_trigger = math.max(pad.left_trigger, lt)
 			end
+			local was_running = self.glitch.phase ~= "idle"
 			engine.tick(e, pad)
+			if was_running and self.glitch.phase == "idle" then
+				self.glitch_watch = 150
+				self.glitch_best = 0
+			end
+			if self.glitch_watch > 0 then
+				self.glitch_watch -= 1
+				local speed = engine.status(e).speed
+				if speed > self.glitch_best then
+					self.glitch_best = speed
+				end
+				if self.glitch_watch == 0 then
+					-- Итог для подбора настроек: лучшая скорость за 2.5 с после глитча.
+					self.player:SetAttribute("SkateGlitchSpeed", self.glitch_best)
+				end
+			end
 			-- Две последние позы для смешивания между тиками.
 			local old = self.previous
 			self.previous = self.current
@@ -343,15 +384,8 @@ function session.start(player: Player): Session?
 				local from = a.bones[i]
 				bones[i] = if from then from:Lerp(cf, alpha) else cf
 			end
-			local state = e.skater.player_input.physical.state.state_16
-			local override: r15_pose.Override? = nil
-			if self.christ_held and not airborne(state) then
-				override = "christ"
-			elseif self.vampire then
-				override = "vampire"
-			end
-			r15_pose.apply(self.rig, bones, override)
-			self.pose_override = override
+			r15_pose.apply(self.rig, bones, nil)
+			self.pose_override = nil
 		end
 		update_camera(self, dt)
 
@@ -360,8 +394,8 @@ function session.start(player: Player): Session?
 		if self.glitch.phase ~= "idle" then
 			table.insert(extras, "спид-глитч: " .. self.glitch.phase)
 		end
-		if self.vampire then
-			table.insert(extras, "вампир")
+		if self.christ_held then
+			table.insert(extras, "Christ Air")
 		end
 		label.Text = string.format(
 			"skate3: состояние %d  скорость %.1f м/с  тиков %d  %.1f мс%s",
@@ -378,17 +412,19 @@ function session.start(player: Player): Session?
 			return
 		end
 		if input.KeyCode == Enum.KeyCode.G then
-			speed_glitch.start(self.glitch)
+			start_glitch(self)
 		elseif input.KeyCode == Enum.KeyCode.J then
 			self.christ_held = true
-		elseif input.KeyCode == Enum.KeyCode.V then
-			self.vampire = not self.vampire
 		end
 	end))
 	table.insert(self.connections, UserInputService.InputEnded:Connect(function(input)
 		if input.KeyCode == Enum.KeyCode.J then
 			self.christ_held = false
 		end
+	end))
+	-- Запуск глитча атрибутом (удобно для подбора настроек из консоли).
+	table.insert(self.connections, player:GetAttributeChangedSignal("SkateGlitchGo"):Connect(function()
+		start_glitch(self)
 	end))
 	table.insert(self.connections, humanoid.Died:Connect(function()
 		session.stop(self)

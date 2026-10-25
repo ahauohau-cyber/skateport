@@ -17,6 +17,7 @@ local CollectionService = game:GetService("CollectionService")
 
 local part_shapes = require(script.Parent.Parent.part_shapes)
 local world_scan = require(script.Parent.world_scan)
+local edge_flags = require(script.Parent.edge_flags)
 
 local world_map = {}
 
@@ -102,6 +103,7 @@ export type Options = {
 	radius: number?, -- стады от spawn: детали дальше не берём (по умолчанию 600)
 	terrain_radius: number?, -- стады: квадрат Terrain вокруг spawn (по умолчанию 220)
 	terrain_step: number?, -- стады: шаг сетки Terrain (по умолчанию 2)
+	edge_flags: boolean?, -- false — отдать рёбра ядру как есть
 	yield: (() -> ())?,
 	log: ((string) -> ())?,
 }
@@ -196,6 +198,10 @@ function world_map.build(root: Instance, spawn: Vector3, heading: number, option
 	end)
 	if has_terrain then
 		add(collision, world_scan.terrain(spawn, opts.terrain_radius or 220, opts.terrain_step or 2, yield))
+	end
+	-- Рёбра на стыках деталей (клин на полу, блоки встык) — не острые края.
+	if opts.edge_flags ~= false then
+		edge_flags.compute(collision, yield)
 	end
 	if opts.log then
 		opts.log(string.format("[skate3] карта: детали %d треуг., terrain %d треуг., рельсов %d", parts_triangles, #collision - parts_triangles, #rails))
