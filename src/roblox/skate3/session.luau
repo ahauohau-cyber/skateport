@@ -187,15 +187,16 @@ local function update_camera(self: Session, dt: number)
 	camera.CFrame = CFrame.lookAt(position, focus)
 end
 
--- Настройки глитча можно переопределить атрибутами игрока:
--- SkateGlitchSettle, SkateGlitchXHold, SkateGlitchRbVy, SkateGlitchRbHold,
--- SkateGlitchGap, SkateGlitchYHold (числа, тики по 1/60 с; RbVy — м/тик).
+-- Настройки глитча можно переопределить атрибутами игрока (тики по 1/60 с):
+-- SkateGlitchDropHold, SkateGlitchSettle, SkateGlitchXHold, SkateGlitchRbAt,
+-- SkateGlitchRbHold, SkateGlitchYAfterRb, SkateGlitchYHold.
 local GLITCH_ATTRIBUTES = {
+	drop_hold = "SkateGlitchDropHold",
 	settle = "SkateGlitchSettle",
 	x_hold = "SkateGlitchXHold",
-	rb_vy = "SkateGlitchRbVy",
+	rb_at = "SkateGlitchRbAt",
 	rb_hold = "SkateGlitchRbHold",
-	gap = "SkateGlitchGap",
+	y_after_rb = "SkateGlitchYAfterRb",
 	y_hold = "SkateGlitchYHold",
 }
 
@@ -334,8 +335,13 @@ function session.start(player: Player): Session?
 			local pad = gamepad
 			local extra = 0
 			local state = e.skater.player_input.physical.state.state_16
-			if self.glitch.phase ~= "idle" and self.hips_index then
-				extra = speed_glitch.step(self.glitch, state, engine.bone_height(e, self.hips_index))
+			local rt = 0
+			local was_running = self.glitch.phase ~= "idle"
+			if was_running and self.hips_index then
+				-- Доска в руках: дека почти на высоте таза (на земле она ~0.8 м ниже).
+				local hips_y = engine.bone_height(e, self.hips_index)
+				local deck_y = engine.deck_transform(e).translation.y
+				extra, rt = speed_glitch.step(self.glitch, state, hips_y - deck_y < 0.45)
 			end
 			local lt = 0
 			if self.christ_held and airborne(state) then
@@ -343,12 +349,12 @@ function session.start(player: Player): Session?
 				extra = bit32.bor(extra, B)
 				lt = LT
 			end
-			if extra ~= 0 or lt ~= 0 then
+			if extra ~= 0 or lt ~= 0 or rt ~= 0 then
 				pad = table.clone(gamepad)
 				pad.buttons = bit32.bor(pad.buttons, extra)
 				pad.left_trigger = math.max(pad.left_trigger, lt)
+				pad.right_trigger = math.max(pad.right_trigger, rt)
 			end
-			local was_running = self.glitch.phase ~= "idle"
 			engine.tick(e, pad)
 			if was_running and self.glitch.phase == "idle" then
 				self.glitch_watch = 150
