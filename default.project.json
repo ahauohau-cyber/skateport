@@ -19,6 +19,9 @@
     "ServerScriptService": {
       "Skate3Admin": {
         "$path": "server/skate3_admin.server.luau"
+      },
+      "Skate3Net": {
+        "$path": "server/skate3_net.server.luau"
       }
     },
     "StarterPlayer": {

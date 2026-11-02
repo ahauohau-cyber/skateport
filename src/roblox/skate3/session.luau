@@ -27,6 +27,7 @@ local world_map = require(script.Parent.world_map)
 local board_model = require(script.Parent.board_model)
 local r15_pose = require(script.Parent.r15_pose)
 local bone_pose = require(script.Parent.bone_pose)
+local net_codec = require(script.Parent.net_codec)
 local speed_glitch = require(script.Parent.speed_glitch)
 local keyboard_pad = require(script.Parent.Parent.keyboard_pad)
 local fixed_step = require(script.Parent.Parent.fixed_step)
@@ -78,6 +79,10 @@ export type Session = {
 	christ_held: boolean,
 	pose_override: r15_pose.Override?,
 	custom: bone_pose.Rig?, -- своя модель на костях вместо аватара (тест)
+	net_stream: UnreliableRemoteEvent?, -- Skate3Net.Stream: снимки другим игрокам
+	net_seq: number,
+	net_last: number, -- время последней отправки (GetServerTimeNow)
+	bone_index: { [string]: number }, -- имя кости скейтера -> индекс
 	glitch_watch: number, -- тиков осталось мерить скорость после глитча
 	boost: number, -- множитель буста спид-глитча (клавиши + и -)
 	glitch_before: number, -- м/с: скорость доски, когда глитч начался из катания
@@ -315,6 +320,33 @@ local function cached_map(feet: Vector3, heading: number, log: (string) -> ()): 
 	return copy
 end
 
+-- ROBLOX: снимок для других игроков (net_codec, ~244 байта). 15 Гц, когда в
+-- игре есть кто-то ещё; одному — 2 Гц (только чтобы сервер двигал персонажа).
+local SEND_PERIOD = 1 / 15
+local SEND_PERIOD_ALONE = 0.5
+local Players = game:GetService("Players")
+
+local function send_snapshot(self: any)
+	local stream = self.net_stream
+	local current = self.current
+	if stream == nil or current == nil or #current.bones == 0 then
+		return
+	end
+	local now = workspace:GetServerTimeNow()
+	local period = if #Players:GetPlayers() > 1 then SEND_PERIOD else SEND_PERIOD_ALONE
+	if now - self.net_last < period then
+		return
+	end
+	self.net_last = now
+	self.net_seq += 1
+	local state = self.engine.skater.player_input.physical.state.state_16
+	local on_board = state < 500 or state >= 600
+	local packet = net_codec.encode(self.net_seq, now, on_board, current.deck, current.bones, self.bone_index)
+	if packet then
+		stream:FireServer(packet)
+	end
+end
+
 local function airborne(state: number): boolean
 	return state >= 200 and state < 300
 end
@@ -384,6 +416,10 @@ function session.start(player: Player): Session?
 		christ_held = false,
 		pose_override = nil,
 		custom = nil,
+		net_stream = nil,
+		net_seq = 0,
+		net_last = 0,
+		bone_index = {},
 		glitch_watch = 0,
 		glitch_best = 0,
 		boost = if type(player:GetAttribute("SkateBoost")) == "number" then player:GetAttribute("SkateBoost") :: number else 1.5,
@@ -417,6 +453,20 @@ function session.start(player: Player): Session?
 			bone_pose.hide(custom, character)
 		elseif not ok then
 			warn("skate3: модель " .. (rig_name :: string) .. ": " .. tostring(custom))
+		end
+	end
+
+	-- Репликация другим игрокам: Skate3Net создаёт серверный скрипт Skate3Net.
+	for i, name in result.bone_names do
+		self.bone_index[string.upper(name)] = i
+	end
+	local net = game:GetService("ReplicatedStorage"):FindFirstChild("Skate3Net")
+	if net then
+		self.net_stream = net:FindFirstChild("Stream") :: UnreliableRemoteEvent?
+		local look = net:FindFirstChild("Look") :: RemoteEvent?
+		if look then
+			-- Какой моделью рисовать нас у других (их клиенты возьмут её из плейса).
+			look:FireServer(if self.custom then (template :: Model).Name else "")
 		end
 	end
 
@@ -561,6 +611,7 @@ function session.start(player: Player): Session?
 			bone_pose.keep_hidden(self.custom)
 		end
 		update_camera(self, dt)
+		send_snapshot(self)
 
 		local st = engine.status(e)
 		local extras = {}

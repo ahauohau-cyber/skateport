@@ -6,7 +6,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local session = require(ReplicatedStorage:WaitForChild("SkatePort"):WaitForChild("roblox"):WaitForChild("skate3"):WaitForChild("session"))
+local skate3 = ReplicatedStorage:WaitForChild("SkatePort"):WaitForChild("roblox"):WaitForChild("skate3")
+local session = require(skate3:WaitForChild("session"))
+local remote_skaters = require(skate3:WaitForChild("remote_skaters"))
+
+-- Других скейтеров видят все игроки, даже те, кто сам не катается.
+remote_skaters.start()
 
 local player = Players.LocalPlayer
 local current: any = nil
