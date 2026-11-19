@@ -34,6 +34,7 @@ local keyboard_pad = require(script.Parent.Parent.keyboard_pad)
 local fixed_step = require(script.Parent.Parent.fixed_step)
 
 local session = {}
+session.active = nil :: any
 
 -- Кнопки XInput.
 local B, LT = 0x2000, 255
@@ -90,6 +91,9 @@ export type Session = {
 	glitch_before: number, -- м/с: скорость доски, когда глитч начался из катания
 	boost_wait: number, -- тиков ждать приземления, чтобы применить буст
 	ramp: { from: number, to: number, tick: number }?, -- плавный разгон после глитча
+	rate_real: number, -- с реального времени в текущем окне замера
+	rate_sim: number, -- с времени симуляции в том же окне
+	sim_rate: number, -- доля реального времени, которую успевает ядро (1 = 100 %)
 	glitch_best: number,
 }
 
@@ -429,6 +433,9 @@ function session.start(player: Player): Session?
 		glitch_before = 0,
 		boost_wait = 0,
 		ramp = nil,
+		rate_real = 0,
+		rate_sim = 0,
+		sim_rate = 1,
 	}
 	for i, name in result.bone_names do
 		if string.upper(name) == "HIPS" then
@@ -593,6 +600,15 @@ function session.start(player: Player): Session?
 			self.current = snapshot(e, old)
 		end)
 		local cost = os.clock() - t
+		-- Успевает ли ядро за реальным временем. Если нет, fixed_step выбрасывает
+		-- время — скейтер для всех едет как в слоу-мо.
+		self.rate_real += math.min(dt, fixed_step.MAX_DELTA)
+		self.rate_sim += ticks * engine.period(e)
+		if self.rate_real >= 1 then
+			self.sim_rate = self.rate_sim / self.rate_real
+			self.rate_real, self.rate_sim = 0, 0
+			self.player:SetAttribute("SkateSimRate", math.floor(self.sim_rate * 100 + 0.5))
+		end
 		if e.failure ~= nil then
 			label.Text = "skate3: ядро остановилось: " .. tostring(e.failure)
 			return
@@ -626,12 +642,13 @@ function session.start(player: Player): Session?
 			table.insert(extras, "Christ Air")
 		end
 		label.Text = string.format(
-			"skate3: состояние %d  скорость %.1f м/с  буст ×%.2g (+/-)  тиков %d  %.1f мс%s",
+			"skate3: состояние %d  скорость %.1f м/с  буст ×%.2g (+/-)  тиков %d  %.1f мс  сим %d%%%s",
 			st.state,
 			st.speed,
 			self.boost,
 			ticks,
 			cost * 1000,
+			math.floor(self.sim_rate * 100 + 0.5),
 			if #extras > 0 then "  [" .. table.concat(extras, ", ") .. "]" else ""
 		)
 	end))
@@ -659,6 +676,8 @@ function session.start(player: Player): Session?
 	table.insert(self.connections, humanoid.Died:Connect(function()
 		session.stop(self)
 	end))
+	-- Для отладки из консоли: текущий сеанс этого клиента.
+	session.active = self
 	return self
 end
 
@@ -667,6 +686,9 @@ function session.stop(self: Session)
 		return
 	end
 	self.stopped = true
+	if session.active == self then
+		session.active = nil
+	end
 	for _, c in self.connections do
 		c:Disconnect()
 	end
