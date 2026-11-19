@@ -20,6 +20,7 @@ local skeleton = require(script.Parent.skeleton)
 local r15_pose = require(script.Parent.r15_pose)
 local bone_pose = require(script.Parent.bone_pose)
 local board_model = require(script.Parent.board_model)
+local skate_audio = require(script.Parent.skate_audio)
 
 local remote_skaters = {}
 
@@ -31,6 +32,7 @@ remote_skaters.CONFIG = {
 	stale_after = 2.0, -- с без пакетов — прячем модель
 	teleport = 40, -- стады за один интервал — не смешиваем
 	keep = 32, -- снимков в буфере
+	extrapolate = 0.25, -- с: столько продолжаем движение, если пакет опоздал
 	-- LOD: расстояние до камеры (стады) -> позу раз в N кадров.
 	tiers = { { distance = 120, every = 1 }, { distance = 300, every = 2 }, { distance = 700, every = 4 } },
 	far_every = 8,
@@ -65,6 +67,8 @@ type Remote = {
 	frame: number, -- счётчик кадров для LOD
 	shown: boolean,
 	posed_hips: Vector3?,
+	voice: skate_audio.Voice?,
+	mode: number,
 }
 
 local remotes: { [Player]: Remote } = {}
@@ -239,6 +243,8 @@ local function remote_of(player: Player): Remote
 			frame = math.random(0, 7), -- разносим дальних по кадрам
 			shown = false,
 			posed_hips = nil,
+			voice = nil,
+			mode = 0,
 		}
 		remotes[player] = r
 	end
@@ -254,9 +260,17 @@ local function on_character(player: Player)
 	end
 end
 
+local function drop_voice(r: Remote)
+	if r.voice then
+		skate_audio.destroy(r.voice)
+		r.voice = nil
+	end
+end
+
 local function drop(player: Player)
 	local r = remotes[player]
 	if r then
+		drop_voice(r)
 		destroy_model(r)
 		show_character(r)
 		remotes[player] = nil
@@ -310,6 +324,24 @@ local function sample(r: Remote, t: number): (CFrame?, Vector3?)
 		return nil, nil
 	end
 	local a, b, alpha = snaps[n], snaps[n], 0
+	local newest = snaps[n]
+	if t > newest.time and n >= 2 then
+		-- Пакет опоздал: недолго продолжаем движение по двум последним
+		-- снимкам (только корень, поза — последняя), потом стоим.
+		local prev = snaps[n - 1]
+		local span = math.max(newest.time - prev.time, 1e-3)
+		local ahead = math.min(t - newest.time, remote_skaters.CONFIG.extrapolate)
+		local velocity = (newest.hips - prev.hips) / span
+		if velocity.Magnitude * span <= remote_skaters.CONFIG.teleport then
+			local shift = velocity * ahead + (if is_echo(r.player) then ECHO_OFFSET else Vector3.zero)
+			local bones = r.bones
+			for name, cf in newest.bones do
+				bones[INDEX[name]] = cf + shift
+			end
+			r.mode = newest.mode
+			return newest.deck + shift, newest.hips + shift
+		end
+	end
 	if t <= snaps[1].time then
 		a, b = snaps[1], snaps[1]
 	else
@@ -333,6 +365,7 @@ local function sample(r: Remote, t: number): (CFrame?, Vector3?)
 	end
 	local deck = (if alpha <= 0 then a.deck elseif alpha >= 1 then b.deck else a.deck:Lerp(b.deck, alpha)) + offset
 	local hips = a.hips:Lerp(b.hips, alpha) + offset
+	r.mode = if alpha < 0.5 then a.mode else b.mode
 	return deck, hips
 end
 
@@ -367,7 +400,7 @@ end
 
 type Job = { r: Remote, distance: number, deck: CFrame, hips: Vector3, pose: boolean }
 
-local function frame()
+local function frame(dt: number)
 	local now = workspace:GetServerTimeNow()
 	local camera = workspace.CurrentCamera
 	local cfg = remote_skaters.CONFIG
@@ -388,6 +421,7 @@ local function frame()
 				show_character(r)
 				r.shown = false
 			end
+			drop_voice(r)
 			continue
 		end
 		if not r.shown or (r.custom == nil and r.model == nil) then
@@ -425,6 +459,15 @@ local function frame()
 		local r = job.r
 		if r.board then
 			board_model.place(r.board, job.deck)
+		end
+		-- Звук: голос только у близких к камере (LOD), дальним — тишина.
+		if job.distance <= skate_audio.HEAR_DISTANCE then
+			if r.voice == nil then
+				r.voice = skate_audio.new(r.player.Name)
+			end
+			skate_audio.update(r.voice :: skate_audio.Voice, dt, r.mode, job.deck.Position, STUDS_PER_METRE, nil)
+		elseif job.distance > skate_audio.HEAR_DISTANCE + 20 then
+			drop_voice(r)
 		end
 		local can_pose = job.pose and (i == 1 or os.clock() - started < cfg.budget)
 		if can_pose then

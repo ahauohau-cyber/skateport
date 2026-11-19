@@ -29,6 +29,7 @@ local r15_pose = require(script.Parent.r15_pose)
 local bone_pose = require(script.Parent.bone_pose)
 local net_codec = require(script.Parent.net_codec)
 local speed_glitch = require(script.Parent.speed_glitch)
+local skate_audio = require(script.Parent.skate_audio)
 local keyboard_pad = require(script.Parent.Parent.keyboard_pad)
 local fixed_step = require(script.Parent.Parent.fixed_step)
 
@@ -65,6 +66,7 @@ export type Session = {
 	previous: Snapshot?,
 	current: Snapshot?,
 	render_bones: { CFrame },
+	voice: any, -- skate_audio.Voice
 	connections: { RBXScriptConnection },
 	saved: { [string]: any },
 	camera_pos: Vector3?,
@@ -273,7 +275,7 @@ end
 -- ROBLOX: карта из Workspace собирается долго (лучи по Terrain, меши), поэтому
 -- держим последнюю и берём её снова, пока игрок в пределах CACHE_RADIUS от
 -- места сборки и в Workspace не добавляли/не убирали детали.
-local CACHE_RADIUS = 200 -- стады
+local CACHE_RADIUS = 400 -- стады (Terrain собирается целиком, детали — в радиусе 600)
 local map_cache: { centre: Vector3, map: any }? = nil
 local cache_watch: { RBXScriptConnection }? = nil
 
@@ -341,7 +343,7 @@ local function send_snapshot(self: any)
 	self.net_seq += 1
 	local state = self.engine.skater.player_input.physical.state.state_16
 	local on_board = state < 500 or state >= 600
-	local packet = net_codec.encode(self.net_seq, now, on_board, current.deck, current.bones, self.bone_index)
+	local packet = net_codec.encode(self.net_seq, now, on_board, net_codec.mode_of(state), current.deck, current.bones, self.bone_index)
 	if packet then
 		stream:FireServer(packet)
 	end
@@ -396,6 +398,7 @@ function session.start(player: Player): Session?
 		previous = nil,
 		current = nil,
 		render_bones = {},
+		voice = skate_audio.new(player.Name),
 		connections = {},
 		saved = {
 			walk = humanoid.WalkSpeed,
@@ -614,6 +617,7 @@ function session.start(player: Player): Session?
 		send_snapshot(self)
 
 		local st = engine.status(e)
+		skate_audio.update(self.voice, dt, net_codec.mode_of(st.state), self.board.model:GetPivot().Position, engine.STUDS_PER_METRE, st.speed)
 		local extras = {}
 		if self.glitch.phase ~= "idle" then
 			table.insert(extras, "спид-глитч: " .. self.glitch.phase)
@@ -668,6 +672,7 @@ function session.stop(self: Session)
 	end
 	keyboard_pad.destroy(self.pad)
 	board_model.destroy(self.board)
+	skate_audio.destroy(self.voice)
 	if self.rig then
 		r15_pose.reset(self.rig)
 	end

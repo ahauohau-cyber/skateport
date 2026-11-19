@@ -7,7 +7,8 @@
 --
 -- Пакет (little-endian):
 --   0  u8   версия
---   1  u8   флаги (бит 0 — на доске)
+--   1  u8   флаги: бит 0 — на доске, биты 1–3 — режим (net_codec.MODE:
+--           земля/воздух/грайнд/падение/пешком/прочее; для звуков у зрителей)
 --   2  u16  номер пакета
 --   4  f64  время отправки (workspace:GetServerTimeNow())
 --  12  f32×3 таз (HIPS) в мире, стады
@@ -43,6 +44,26 @@ net_codec.BONES = {
 	"LEFTFOOT",
 	"LEFTTOEBASE",
 }
+
+-- Режим скейтера по состоянию ядра (state_16). Старые клиенты бит 1–3 не
+-- читают, поэтому версия пакета прежняя.
+net_codec.MODE = { ground = 0, air = 1, grind = 2, bail = 3, offboard = 4, other = 5 }
+
+function net_codec.mode_of(state: number): number
+	local M = net_codec.MODE
+	if state >= 100 and state < 200 then
+		return M.ground
+	elseif state >= 200 and state < 300 then
+		return M.air
+	elseif state >= 300 and state < 400 then
+		return M.bail
+	elseif state >= 400 and state < 500 then
+		return M.grind
+	elseif state >= 500 and state < 600 then
+		return M.offboard
+	end
+	return M.other
+end
 
 local HEADER = 24
 local ROW = 10
@@ -120,7 +141,7 @@ local function read_row(b: buffer, offset: number, origin: Vector3): CFrame
 end
 
 -- index — имя кости скейтера -> индекс в bones (как bone_names ядра).
-function net_codec.encode(seq: number, time: number, on_board: boolean, deck: CFrame, bones: { CFrame }, index: { [string]: number }): buffer?
+function net_codec.encode(seq: number, time: number, on_board: boolean, mode: number, deck: CFrame, bones: { CFrame }, index: { [string]: number }): buffer?
 	local hips = bones[index.HIPS]
 	if hips == nil then
 		return nil
@@ -131,7 +152,7 @@ function net_codec.encode(seq: number, time: number, on_board: boolean, deck: CF
 	end
 	local b = buffer.create(net_codec.SIZE)
 	buffer.writeu8(b, 0, net_codec.VERSION)
-	buffer.writeu8(b, 1, if on_board then 1 else 0)
+	buffer.writeu8(b, 1, (if on_board then 1 else 0) + bit32.band(mode, 7) * 2)
 	buffer.writeu16(b, 2, seq % 65536)
 	buffer.writef64(b, 4, time)
 	buffer.writef32(b, 12, origin.X)
@@ -152,6 +173,7 @@ export type Snapshot = {
 	seq: number,
 	time: number,
 	on_board: boolean,
+	mode: number, -- net_codec.MODE
 	hips: Vector3,
 	deck: CFrame,
 	bones: { [string]: CFrame }, -- по именам из BONES
@@ -182,6 +204,7 @@ function net_codec.decode(b: any): Snapshot?
 		seq = buffer.readu16(b, 2),
 		time = buffer.readf64(b, 4),
 		on_board = bit32.band(buffer.readu8(b, 1), 1) ~= 0,
+		mode = bit32.band(bit32.rshift(buffer.readu8(b, 1), 1), 7),
 		hips = origin,
 		deck = read_row(b, HEADER, origin),
 		bones = bones,

@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- ROBLOX: карта SKATE (crates/skate-data/src/skate_map.rs, SkateMap) из деталей плейса.
 --
@@ -102,18 +104,26 @@ export type BuildResult = {
 export type Options = {
 	filter: ((BasePart) -> boolean)?,
 	radius: number?, -- стады от spawn: детали дальше не берём (по умолчанию 600)
-	terrain_radius: number?, -- стады: квадрат Terrain вокруг spawn (по умолчанию 220)
-	terrain_step: number?, -- стады: шаг сетки Terrain (по умолчанию 2)
+	terrain_radius: number?, -- стады: квадрат Terrain вокруг spawn ровной сеткой; nil — весь Terrain адаптивно
+	terrain_step: number?, -- стады: шаг ровной сетки Terrain (по умолчанию 2)
 	edge_flags: boolean?, -- false — отдать рёбра ядру как есть
 	yield: (() -> ())?,
 	log: ((string) -> ())?,
 }
+
+-- Детали мельче этого (стады, по самой длинной стороне) скейт не видит:
+-- болты, листья, мелкий декор только множат треугольники.
+world_map.MIN_PART = 0.4
 
 -- Треугольники одной детали любым доступным способом.
 local function part_triangles(part: BasePart): { any }
 	local exact = part_shapes.part_triangles(part)
 	if exact ~= nil then
 		return exact
+	end
+	-- Как в физике Roblox: CollisionFidelity = Box — столкновение коробкой.
+	if (part:IsA("MeshPart") or part:IsA("PartOperation")) and (part :: any).CollisionFidelity == Enum.CollisionFidelity.Box then
+		return part_shapes.box_triangles(part.CFrame, part.Size)
 	end
 	if part:IsA("MeshPart") then
 		return world_scan.mesh_part(part)
@@ -167,16 +177,27 @@ function world_map.build(root: Instance, spawn: Vector3, heading: number, option
 	local accept = opts.filter or world_map.default_filter
 	local radius = opts.radius or 600
 	local yield = opts.yield
+	local t_start = os.clock()
 	local collision = {}
 	local rails = {}
 	local skipped = {}
 	local count = 0
-	for _, item in root:GetDescendants() do
+	local descendants = root:GetDescendants()
+	-- Меши — заранее и параллельно (иначе каждый ждёт сеть по очереди).
+	local meshes: { MeshPart } = {}
+	for _, item in descendants do
+		if item:IsA("MeshPart") and item.CollisionFidelity ~= Enum.CollisionFidelity.Box and distance_to(item, spawn) <= radius and accept(item) then
+			table.insert(meshes, item)
+		end
+	end
+	world_scan.prefetch_meshes(meshes, 8)
+	for _, item in descendants do
 		if item:IsA("BasePart") and item ~= workspace.Terrain and distance_to(item, spawn) <= radius then
 			if is_rail(item) then
 				table.insert(rails, { name = item:GetFullName(), closed = false, points = rail_points(item), native = nil })
 			end
-			if accept(item) then
+			local size = item.Size
+			if accept(item) and math.max(size.X, size.Y, size.Z) >= world_map.MIN_PART then
 				local ok, triangles = pcall(part_triangles, item)
 				if ok then
 					add(collision, triangles)
@@ -191,21 +212,45 @@ function world_map.build(root: Instance, spawn: Vector3, heading: number, option
 		end
 	end
 	local parts_triangles = #collision
+	local t_parts = os.clock()
 	-- Terrain: только если в нём что-то есть.
 	local terrain = workspace.Terrain
 	local has_terrain = false
 	pcall(function()
 		has_terrain = terrain:CountCells() > 0
 	end)
+	local rays = 0
 	if has_terrain then
-		add(collision, world_scan.terrain(spawn, opts.terrain_radius or 220, opts.terrain_step or 2, yield))
+		if opts.terrain_radius then
+			-- Старый способ: ровная сетка вокруг точки появления.
+			add(collision, world_scan.terrain(spawn, opts.terrain_radius, opts.terrain_step or 2, yield))
+		else
+			-- Весь Terrain адаптивной сеткой (плоское — крупно, неровное — мелко).
+			local lo, hi = world_scan.terrain_bounds(2048, 64, yield)
+			if lo and hi then
+				local tris
+				tris, rays = world_scan.terrain_adaptive(lo, hi, yield)
+				add(collision, tris)
+			end
+		end
 	end
+	local t_terrain = os.clock()
 	-- Рёбра на стыках деталей (клин на полу, блоки встык) — не острые края.
 	if opts.edge_flags ~= false then
 		edge_flags.compute(collision, yield)
 	end
+	local t_edges = os.clock()
 	if opts.log then
-		opts.log(string.format("[skate3] карта: детали %d треуг., terrain %d треуг., рельсов %d", parts_triangles, #collision - parts_triangles, #rails))
+		opts.log(string.format(
+			"[skate3] карта: детали %d треуг. (%.2f с), terrain %d треуг. / %d лучей (%.2f с), рёбра %.2f с, рельсов %d",
+			parts_triangles,
+			t_parts - t_start,
+			#collision - parts_triangles,
+			rays,
+			t_terrain - t_parts,
+			t_edges - t_terrain,
+			#rails
+		))
 	end
 	local map = {
 		version = 1,

@@ -1,22 +1,33 @@
 --!strict
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
--- ROBLOX: запуск ядра sim (ReplicatedStorage.Skate3.sim) для одного скейтера.
+-- ROBLOX: запуск ядра sim (SkateLib.Skate3.sim, см. SkateLocator) для одного скейтера.
 --
 -- Порядок загрузки и тика — как в Rust (crates/skate-game/src/main.rs и
 -- PhysicsPlugin в physics.rs): Config -> StockGameplayConfig -> GameAssets ->
 -- StockGraphs -> GamePhysics (с нашей картой из Workspace) -> SkaterRuntime ->
 -- PlayerControls; тик: poll_controllers -> publish_actions -> controls.sample ->
--- physics.advance. Модуль без Roblox API, кроме поиска sim в ReplicatedStorage.
+-- physics.advance. Модуль без Roblox API, кроме поиска sim через SkateLocator.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local engine = {}
 
+-- ROBLOX: контейнер с ядром: ServerStorage.SkateLib на сервере, PlayerGui.SkateLib
+-- у скейтера (ReplicatedStorage.SkateLocator). Без локатора — старое место,
+-- ReplicatedStorage (тестовые плейсы).
+function engine.root(): Instance
+	local locator = ReplicatedStorage:FindFirstChild("SkateLocator")
+	if locator then
+		return (require :: any)(locator)
+	end
+	return ReplicatedStorage
+end
+
 -- Скейт меряет в метрах; 1 стад = 0.28 м.
 engine.STUDS_PER_METRE = 1 / 0.28
 
 local function sim_root(): Instance
-	return ReplicatedStorage:WaitForChild("Skate3"):WaitForChild("sim")
+	return engine.root():WaitForChild("Skate3"):WaitForChild("sim")
 end
 
 function engine.import(): (string) -> any
@@ -119,7 +130,7 @@ function engine.boot(map: any, log: ((string) -> ())?, yield: (() -> ())?): Engi
 		return physics_mod.PlayerControls.load(config.asset_root)
 	end)
 	local camera = stage("camera", function()
-		local shake = ReplicatedStorage.Skate3.sim_data.misc:FindFirstChild("camera_shake")
+		local shake = engine.root().Skate3.sim_data.misc:FindFirstChild("camera_shake")
 		return import("skate_game/camera").spawn(config, if shake then require(shake :: ModuleScript) else nil)
 	end)
 

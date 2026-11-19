@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 -- Порт из skate-3-rust-engine (GPL-3.0) — github.com/SK8-ENGINE/skate-3-rust-engine
 -- ROBLOX: треугольники столкновений для того, что нельзя разложить формулой:
 --   * Terrain          — карта высот из лучей Roblox (вода пропускается);
@@ -17,8 +19,9 @@ local AssetService = game:GetService("AssetService")
 
 local world_scan = {}
 
--- Секунд работы за кадр при сборке карты (дальше — уступить кадр).
-world_scan.FRAME_BUDGET = 0.004
+-- Секунд работы за кадр при сборке карты (дальше — уступить кадр). Карта
+-- строится под экраном загрузки, поэтому кадр можно занять почти целиком.
+world_scan.FRAME_BUDGET = 0.012
 
 local M = 0.28
 
@@ -148,8 +151,181 @@ function world_scan.terrain(centre: Vector3, radius: number, step: number, yield
 	return grid_triangles(heights, x0, z0, step, n, n, nil)
 end
 
+-- ROBLOX: границы Terrain в плане (стады): редкая сетка лучей ±limit от
+-- начала координат, шаг coarse. nil — Terrain пуст.
+function world_scan.terrain_bounds(limit: number, coarse: number, yield: (() -> ())?): (Vector2?, Vector2?)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace.Terrain }
+	params.IgnoreWater = true
+	local lo, hi = nil :: Vector2?, nil :: Vector2?
+	local started = os.clock()
+	local direction = Vector3.new(0, -4096, 0)
+	for x = -limit, limit, coarse do
+		for z = -limit, limit, coarse do
+			if workspace:Raycast(Vector3.new(x, 2048, z), direction, params) then
+				local p = Vector2.new(x, z)
+				lo = if lo then lo:Min(p) else p
+				hi = if hi then hi:Max(p) else p
+			end
+		end
+		if yield and os.clock() - started > world_scan.FRAME_BUDGET then
+			yield()
+			started = os.clock()
+		end
+	end
+	if lo == nil or hi == nil then
+		return nil, nil
+	end
+	-- Запас в шаг: между лучами мог быть ещё кусок.
+	return (lo :: Vector2) - Vector2.new(coarse, coarse), (hi :: Vector2) + Vector2.new(coarse, coarse)
+end
+
+-- ROBLOX: Terrain адаптивной сеткой (квадродерево). Плоские участки — крупные
+-- квадраты до LEAF_MAX стадов, неровные — дробим до шага step. Лучей и
+-- треугольников в разы меньше, чем у ровной сетки. Стыки разного размера
+-- («T-образные») не дают ступенек: точки на общей стороне проверены на
+-- отклонение ≤ TOLERANCE, а флаги рёбер (edge_flags) считают такие рёбра швом.
+world_scan.TERRAIN_STEP = 2 -- стады: самая мелкая клетка
+world_scan.TERRAIN_LEAF_MAX = 32 -- стады: самая крупная клетка
+world_scan.TERRAIN_TOLERANCE = 0.15 -- стады: допустимое отклонение от плоскости
+
+function world_scan.terrain_adaptive(lo: Vector2, hi: Vector2, yield: (() -> ())?): ({ Triangle }, number)
+	local step = world_scan.TERRAIN_STEP
+	local root_cells = math.max(1, math.floor(world_scan.TERRAIN_LEAF_MAX / step))
+	-- root_cells — степень двойки, чтобы делить пополам до одной клетки.
+	root_cells = 2 ^ math.floor(math.log(root_cells, 2))
+	local tol = world_scan.TERRAIN_TOLERANCE
+	local nx = math.ceil((hi.X - lo.X) / step)
+	local nz = math.ceil((hi.Y - lo.Y) / step)
+	local roots_x = math.ceil(nx / root_cells)
+	local roots_z = math.ceil(nz / root_cells)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Include
+	params.FilterDescendantsInstances = { workspace.Terrain }
+	params.IgnoreWater = true
+	local direction = Vector3.new(0, -4096, 0)
+	local cache: { [number]: number | false } = {}
+	local rays = 0
+	local started = os.clock()
+	local STRIDE = 1048576
+
+	-- Высота в узле сетки (i, j) — лучом, с кэшем.
+	local function height(i: number, j: number): number?
+		local key = i * STRIDE + j
+		local v = cache[key]
+		if v == nil then
+			rays += 1
+			local hit = workspace:Raycast(Vector3.new(lo.X + i * step, 2048, lo.Y + j * step), direction, params)
+			v = if hit then hit.Position.Y else false
+			cache[key] = v
+			if yield and os.clock() - started > world_scan.FRAME_BUDGET then
+				yield()
+				started = os.clock()
+			end
+		end
+		return if v then v else nil
+	end
+
+	local out: { Triangle } = {}
+	local up = Vector3.yAxis
+	local function point(i: number, j: number, y: number): Vector3
+		return Vector3.new(lo.X + i * step, y, lo.Y + j * step)
+	end
+
+	-- Высота по двум треугольникам квадрата (i, j, size) в точке (u, v) ∈ [0,1]².
+	local function predict(a: number, b: number, c: number, d: number, diag_ac: boolean, u: number, v: number): number
+		-- a=(0,0) b=(1,0) c=(1,1) d=(0,1)
+		if diag_ac then
+			if u >= v then
+				return a + (b - a) * u + (c - b) * v
+			end
+			return a + (c - d) * u + (d - a) * v
+		end
+		if u + v <= 1 then
+			return a + (b - a) * u + (d - a) * v
+		end
+		return c + (d - c) * (1 - u) + (b - c) * (1 - v)
+	end
+
+	local function emit(i: number, j: number, size: number, a: number, b: number, c: number, d: number, diag_ac: boolean)
+		local pa, pb = point(i, j, a), point(i + size, j, b)
+		local pc, pd = point(i + size, j + size, c), point(i, j + size, d)
+		if diag_ac then
+			push(out, pa, pb, pc, up)
+			push(out, pa, pc, pd, up)
+		else
+			push(out, pa, pb, pd, up)
+			push(out, pb, pc, pd, up)
+		end
+	end
+
+	local function node(i: number, j: number, size: number)
+		if i >= nx or j >= nz then
+			return
+		end
+		local a, b = height(i, j), height(i + size, j)
+		local c, d = height(i + size, j + size), height(i, j + size)
+		if size == 1 then
+			if a and b and c and d then
+				emit(i, j, 1, a, b, c, d, math.abs(a - c) <= math.abs(b - d))
+			else
+				-- Край Terrain: хотя бы три точки.
+				local pts = {}
+				for _, q in { { i, j, a }, { i + 1, j, b }, { i + 1, j + 1, c }, { i, j + 1, d } } do
+					if q[3] then
+						table.insert(pts, point(q[1] :: number, q[2] :: number, q[3] :: number))
+					end
+				end
+				if #pts == 3 then
+					push(out, pts[1], pts[2], pts[3], up)
+				end
+			end
+			return
+		end
+		local flat = a ~= nil and b ~= nil and c ~= nil and d ~= nil
+		if flat then
+			local diag_ac = math.abs((a :: number) - (c :: number)) <= math.abs((b :: number) - (d :: number))
+			-- Проверка решёткой: при size ≥ 4 — 5×5 точек, иначе 3×3.
+			local k = if size >= 4 then 4 else 2
+			for u = 0, k do
+				for v = 0, k do
+					if (u == 0 or u == k) and (v == 0 or v == k) then
+						continue -- углы уже есть
+					end
+					local hu = height(i + size * u // k, j + size * v // k)
+					if hu == nil or math.abs(hu - predict(a :: number, b :: number, c :: number, d :: number, diag_ac, u / k, v / k)) > tol then
+						flat = false
+						break
+					end
+				end
+				if not flat then
+					break
+				end
+			end
+			if flat then
+				emit(i, j, size, a :: number, b :: number, c :: number, d :: number, diag_ac)
+				return
+			end
+		end
+		local half = size // 2
+		node(i, j, half)
+		node(i + half, j, half)
+		node(i, j + half, half)
+		node(i + half, j + half, half)
+	end
+
+	for rx = 0, roots_x - 1 do
+		for rz = 0, roots_z - 1 do
+			node(rx * root_cells, rz * root_cells, root_cells)
+		end
+	end
+	return out, rays
+end
+
 -- Карта высот по одной детали (ось-выровненная сетка по её мировому AABB).
-function world_scan.part_heightfield(part: BasePart): { Triangle }
+function world_scan.part_heightfield(part: BasePart, max_points: number?): { Triangle }
 	local cf, size = part.CFrame, part.Size
 	local corners = {}
 	for _, sx in { -1, 1 } do
@@ -166,7 +342,7 @@ function world_scan.part_heightfield(part: BasePart): { Triangle }
 	end
 	local extent = hi - lo
 	-- Шаг: ~32 точки по длинной стороне, но не мельче 0.5 и не крупнее 2 стадов.
-	local step = math.clamp(math.max(extent.X, extent.Z) / 32, 0.5, 2)
+	local step = math.clamp(math.max(extent.X, extent.Z) / (max_points or 32), 0.5, 4)
 	local nx = math.max(2, math.ceil(extent.X / step) + 1)
 	local nz = math.max(2, math.ceil(extent.Z / step) + 1)
 	-- Сетку растягиваем ровно на AABB.
@@ -213,11 +389,61 @@ local function mesh_faces(part: MeshPart): { { Vector3 } }?
 	return faces
 end
 
+-- ROBLOX: скачать меши заранее параллельно (CreateEditableMeshAsync ждёт сеть;
+-- по одному — секунды на плейс с сотней разных мешей). До `parallel` запросов
+-- одновременно, повторяющиеся MeshId — один раз.
+function world_scan.prefetch_meshes(parts: { MeshPart }, parallel: number?)
+	local limit = parallel or 8
+	local queue: { MeshPart } = {}
+	local seen: { [string]: boolean } = {}
+	for _, part in parts do
+		local key = part.MeshId
+		if key ~= "" and mesh_cache[key] == nil and not seen[key] then
+			seen[key] = true
+			table.insert(queue, part)
+		end
+	end
+	if #queue == 0 then
+		return
+	end
+	local running = 0
+	local index = 0
+	local waiting = coroutine.running()
+	local parked = false
+	local function worker()
+		while index < #queue do
+			index += 1
+			pcall(mesh_faces, queue[index])
+		end
+		running -= 1
+		if running == 0 and parked then
+			parked = false
+			task.spawn(waiting)
+		end
+	end
+	for _ = 1, math.min(limit, #queue) do
+		running += 1
+		task.spawn(worker)
+	end
+	if running > 0 then
+		parked = true
+		coroutine.yield()
+	end
+end
+
 -- Треугольники MeshPart: настоящие (EditableMesh) или карта высот.
+-- ROBLOX: меш тяжелее этого числа треугольников (декор: тыквы, деревья) для
+-- столкновений берём грубой картой высот — верх совпадает, а треугольников
+-- и работы ядру в десятки раз меньше.
+world_scan.MESH_EXACT_LIMIT = 400
+
 function world_scan.mesh_part(part: MeshPart): { Triangle }
 	local faces = mesh_faces(part)
 	if faces == nil then
 		return world_scan.part_heightfield(part)
+	end
+	if #faces > world_scan.MESH_EXACT_LIMIT and part:GetAttribute("SkatePrecise") ~= true then
+		return world_scan.part_heightfield(part, 12)
 	end
 	-- Вершины меша в его исходных единицах; деталь растягивает их Size / MeshSize.
 	local mesh_size = part.MeshSize

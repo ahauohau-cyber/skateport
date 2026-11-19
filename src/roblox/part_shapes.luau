@@ -133,12 +133,7 @@ end
 -- Треугольники одной детали в мировых метрах. Лицевая сторона (нормаль
 -- (b - a) x (c - a), как в triangle_from_volume) всегда наружу: деталь выпуклая,
 -- поэтому сравниваем нормаль с направлением от внутренней точки детали.
-function part_shapes.part_triangles(part: BasePart, surface: number?): { Triangle }?
-	local faces = part_faces(part)
-	if faces == nil then
-		return nil
-	end
-	local cf = part.CFrame
+local function triangles_from_faces(faces: { Face }, cf: CFrame, surface: number?): { Triangle }
 	local scale = part_shapes.METRES_PER_STUD
 	-- Внутренняя точка — среднее всех вершин: для выпуклой детали оно строго
 	-- внутри. Центр детали не годится: скат клина проходит прямо через него.
@@ -168,6 +163,20 @@ function part_shapes.part_triangles(part: BasePart, surface: number?): { Triangl
 		end
 	end
 	return out
+end
+
+function part_shapes.part_triangles(part: BasePart, surface: number?): { Triangle }?
+	local faces = part_faces(part)
+	if faces == nil then
+		return nil
+	end
+	return triangles_from_faces(faces, part.CFrame, surface)
+end
+
+-- ROBLOX: коробка по CFrame и размеру (стады) — для мешей с
+-- CollisionFidelity = Box и тяжёлых декоративных мешей.
+function part_shapes.box_triangles(cf: CFrame, size: Vector3, surface: number?): { Triangle }
+	return triangles_from_faces(block_faces(size), cf, surface)
 end
 
 return part_shapes

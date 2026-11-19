@@ -3,6 +3,7 @@
 -- ROBLOX: админ-команда скейта.
 --   /skate            — включить/выключить скейт себе
 --   /skate <ник>      — включить/выключить игроку (по началу ника или DisplayName)
+-- Включить из своего серверного скрипта: player:SetAttribute("Skate3", true).
 -- Права: владелец игры (или владелец группы / ранг >= 254), плюс ADMINS ниже.
 
 local Players = game:GetService("Players")
@@ -43,6 +44,44 @@ end
 
 local function toggle(target: Player)
 	target:SetAttribute("Skate3", not (target:GetAttribute("Skate3") == true))
+end
+
+-- ROBLOX: ядро скейта (~25 МБ) лежит в ServerStorage.SkateLib и копируется в
+-- PlayerGui только тому, кто катается (PlayerGui реплицируется лишь своему
+-- игроку). SkateLib — ScreenGui с ResetOnSpawn = false: копия переживает
+-- респаун, при повторном /skate заново не скачивается. Атрибут SkateLibSize —
+-- сколько объектов в копии: клиент ждёт, пока все дойдут, и показывает прогресс.
+local ServerStorage = game:GetService("ServerStorage")
+
+local function give_lib(player: Player)
+	local gui = player:FindFirstChildOfClass("PlayerGui")
+	local lib = ServerStorage:FindFirstChild("SkateLib")
+	if gui == nil or lib == nil or gui:FindFirstChild("SkateLib") then
+		return
+	end
+	local copy = lib:Clone()
+	local count = 0
+	for _ in copy:GetDescendants() do
+		count += 1
+	end
+	copy:SetAttribute("SkateLibSize", count)
+	copy.Parent = gui
+end
+
+local function watch(player: Player)
+	player:GetAttributeChangedSignal("Skate3"):Connect(function()
+		if player:GetAttribute("Skate3") == true then
+			give_lib(player)
+		end
+	end)
+	if player:GetAttribute("Skate3") == true then
+		give_lib(player)
+	end
+end
+
+Players.PlayerAdded:Connect(watch)
+for _, p in Players:GetPlayers() do
+	watch(p)
 end
 
 local function run(speaker: Player, text: string)

@@ -1,18 +1,36 @@
 {
   "name": "skateport",
+  "globIgnorePaths": [
+    "src/roblox/world_geometry.luau",
+    "src/roblox/board_demo.luau"
+  ],
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
       "SkatePort": {
-        "$path": "src"
-      },
-      "Skate3": {
         "$className": "Folder",
-        "sim": {
-          "$path": "build/sim.rbxm"
+        "roblox": {
+          "$path": "src/roblox"
+        }
+      },
+      "SkateLocator": {
+        "$path": "place/skate_locator.luau"
+      }
+    },
+    "ServerStorage": {
+      "SkateLib": {
+        "$className": "ScreenGui",
+        "$properties": {
+          "ResetOnSpawn": false
         },
-        "sim_data": {
-          "$path": "build/sim_data.rbxm"
+        "Skate3": {
+          "$className": "Folder",
+          "sim": {
+            "$path": "build/sim.rbxm"
+          },
+          "sim_data": {
+            "$path": "build/sim_data.rbxm"
+          }
         }
       }
     },
