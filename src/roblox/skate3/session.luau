@@ -30,6 +30,7 @@ local bone_pose = require(script.Parent.bone_pose)
 local net_codec = require(script.Parent.net_codec)
 local speed_glitch = require(script.Parent.speed_glitch)
 local skate_audio = require(script.Parent.skate_audio)
+local name_tags = require(script.Parent.name_tags)
 local keyboard_pad = require(script.Parent.Parent.keyboard_pad)
 local fixed_step = require(script.Parent.Parent.fixed_step)
 
@@ -68,6 +69,7 @@ export type Session = {
 	current: Snapshot?,
 	render_bones: { CFrame },
 	voice: any, -- skate_audio.Voice
+	hidden_tags: { [any]: boolean }, -- свои ники/титулы, спрятанные на время скейта
 	connections: { RBXScriptConnection },
 	saved: { [string]: any },
 	camera_pos: Vector3?,
@@ -403,6 +405,7 @@ function session.start(player: Player): Session?
 		current = nil,
 		render_bones = {},
 		voice = skate_audio.new(player.Name),
+		hidden_tags = {},
 		connections = {},
 		saved = {
 			walk = humanoid.WalkSpeed,
@@ -631,6 +634,7 @@ function session.start(player: Player): Session?
 		end
 		update_camera(self, dt)
 		send_snapshot(self)
+		name_tags.hide(self.character, self.hidden_tags)
 
 		local st = engine.status(e)
 		skate_audio.update(self.voice, dt, net_codec.mode_of(st.state), self.board.model:GetPivot().Position, engine.STUDS_PER_METRE, st.speed)
@@ -695,6 +699,7 @@ function session.stop(self: Session)
 	keyboard_pad.destroy(self.pad)
 	board_model.destroy(self.board)
 	skate_audio.destroy(self.voice)
+	name_tags.show(self.hidden_tags)
 	if self.rig then
 		r15_pose.reset(self.rig)
 	end

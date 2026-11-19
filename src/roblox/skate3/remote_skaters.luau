@@ -21,6 +21,7 @@ local r15_pose = require(script.Parent.r15_pose)
 local bone_pose = require(script.Parent.bone_pose)
 local board_model = require(script.Parent.board_model)
 local skate_audio = require(script.Parent.skate_audio)
+local name_tags = require(script.Parent.name_tags)
 
 local remote_skaters = {}
 
@@ -68,6 +69,7 @@ type Remote = {
 	shown: boolean,
 	posed_hips: Vector3?,
 	voice: skate_audio.Voice?,
+	hidden_tags: name_tags.Hidden, -- ники/титулы настоящего персонажа
 	mode: number,
 }
 
@@ -95,6 +97,8 @@ end
 -- Спрятать настоящего персонажа (его двигает сервер грубо, 5 Гц).
 local function hide_character(r: Remote)
 	local character = r.player.Character
+	-- Ники и титулы — каждый кадр (их включают обратно бабл-чат и титулы).
+	name_tags.hide(character, r.hidden_tags)
 	if character == nil then
 		return
 	end
@@ -128,6 +132,7 @@ local function show_character(r: Remote)
 		end
 	end
 	table.clear(r.hidden)
+	name_tags.show(r.hidden_tags)
 	local h = r.hidden_humanoid
 	if h and h.humanoid.Parent then
 		h.humanoid.DisplayDistanceType = h.distance
@@ -151,6 +156,8 @@ local function clone_avatar(player: Player): Model?
 		return nil
 	end
 	local model = copy :: Model
+	-- Без ников и титулов: в режиме скейта над игроком их нет.
+	name_tags.strip(model)
 	for _, d in model:GetDescendants() do
 		if d:IsA("BaseScript") or d:IsA("Animator") or d:IsA("ForceField") or d:IsA("Sound") then
 			d:Destroy()
@@ -165,7 +172,6 @@ local function clone_avatar(player: Player): Model?
 	if humanoid then
 		humanoid.PlatformStand = true
 		humanoid.EvaluateStateMachine = false
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
 	end
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if root then
@@ -244,6 +250,7 @@ local function remote_of(player: Player): Remote
 			shown = false,
 			posed_hips = nil,
 			voice = nil,
+			hidden_tags = {},
 			mode = 0,
 		}
 		remotes[player] = r
